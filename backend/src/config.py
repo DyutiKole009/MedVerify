@@ -1,68 +1,83 @@
 """
-Central configuration for MedVerify backend loaded from environment variables and .env.
+Central configuration for MedVerify backend loaded directly from .env using python-dotenv.
 """
-from typing import List, Optional
-from pydantic_settings import BaseSettings, SettingsConfigDict
-
+import os
+import json
 from pathlib import Path
+from dotenv import load_dotenv
 
+# Locate and load .env file
 ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
+ENV_EXAMPLE_PATH = Path(__file__).resolve().parent.parent / ".env.example"
 
-class Settings(BaseSettings):
-    # AWS Core
-    AWS_REGION: str = "us-east-1"
-    AWS_ACCESS_KEY_ID: Optional[str] = None
-    AWS_SECRET_ACCESS_KEY: Optional[str] = None
-    AWS_SESSION_TOKEN: Optional[str] = None
+if ENV_PATH.exists():
+    load_dotenv(dotenv_path=ENV_PATH)
+elif ENV_EXAMPLE_PATH.exists():
+    load_dotenv(dotenv_path=ENV_EXAMPLE_PATH)
 
-    # DynamoDB Tables
-    DYNAMODB_BATCHES_TABLE: str = "MedVerify_Batches"
-    DYNAMODB_REPORTS_TABLE: str = "MedVerify_Reports"
-    DYNAMODB_SESSIONS_TABLE: str = "MedVerify_Sessions"
-    DYNAMODB_MANUFACTURERS_TABLE: str = "MedVerify_Manufacturers"
-    DYNAMODB_INGESTED_DOCS_TABLE: str = "MedVerify_IngestedDocs"
 
-    # S3 Buckets
-    S3_RAW_DOCUMENTS_BUCKET: str = "medverify-raw-documents"
-    S3_UPLOADS_BUCKET: str = "medverify-uploads"
-    S3_KB_DOCUMENTS_BUCKET: str = "medverify-kb-documents"
+class Settings:
+    """
+    Configuration loaded directly from .env via python-dotenv.
+    Attributes are read dynamically from os.environ.
+    """
+    # Type hints for editor autocomplete
+    AWS_REGION: str
+    AWS_ACCESS_KEY_ID: str | None
+    AWS_SECRET_ACCESS_KEY: str | None
+    AWS_SESSION_TOKEN: str | None
 
-    # Bedrock Models
-    BEDROCK_ORCHESTRATOR_MODEL_ID: str = "amazon.nova-micro-v1:0"
-    BEDROCK_VISION_MODEL_ID: str = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
-    BEDROCK_SYNTHESIS_MODEL_ID: str = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
-    BEDROCK_DEEP_AGENT_MODEL_ID: str = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+    DYNAMODB_BATCHES_TABLE: str
+    DYNAMODB_REPORTS_TABLE: str
+    DYNAMODB_SESSIONS_TABLE: str
+    DYNAMODB_MANUFACTURERS_TABLE: str
+    DYNAMODB_INGESTED_DOCS_TABLE: str
 
-    # Bedrock Knowledge Base & Memory
-    BEDROCK_KB_ID: str = "mock-kb-id"
-    BEDROCK_KB_DATA_SOURCE_NOTICES_ID: str = "mock-ds-notices-id"
-    BEDROCK_KB_DATA_SOURCE_CASES_ID: str = "mock-ds-cases-id"
-    AGENTCORE_MEMORY_ID: str = "medverify-investigation-memory"
+    S3_RAW_DOCUMENTS_BUCKET: str
+    S3_UPLOADS_BUCKET: str
+    S3_KB_DOCUMENTS_BUCKET: str
 
-    # Step Functions
-    STATE_MACHINE_REACTIVE_ARN: str = "arn:aws:states:us-east-1:123456789012:stateMachine:MedVerifyReactiveVerification"
+    BEDROCK_ORCHESTRATOR_MODEL_ID: str
+    BEDROCK_VISION_MODEL_ID: str
+    BEDROCK_SYNTHESIS_MODEL_ID: str
+    BEDROCK_DEEP_AGENT_MODEL_ID: str
 
-    # EventBridge & SNS
-    EVENT_BUS_NAME: str = "default"
-    SNS_ALERTS_TOPIC_ARN: str = "arn:aws:sns:us-east-1:123456789012:medverify-spurious-alerts"
+    BEDROCK_KB_ID: str
+    BEDROCK_KB_DATA_SOURCE_NOTICES_ID: str
+    BEDROCK_KB_DATA_SOURCE_CASES_ID: str
+    AGENTCORE_MEMORY_ID: str
 
-    # Cognito
-    COGNITO_USER_POOL_ID: str = "us-east-1_mockpool"
-    COGNITO_APP_CLIENT_ID: str = "mockclientid123"
+    STATE_MACHINE_REACTIVE_ARN: str
+    EVENT_BUS_NAME: str
+    SNS_ALERTS_TOPIC_ARN: str
+    COGNITO_USER_POOL_ID: str
+    COGNITO_APP_CLIENT_ID: str
+    OPENSEARCH_ENDPOINT: str
+    OPENSEARCH_INDEX_DRUGS: str
 
-    # OpenSearch Serverless
-    OPENSEARCH_ENDPOINT: str = "https://example-collection.us-east-1.aoss.amazonaws.com"
-    OPENSEARCH_INDEX_DRUGS: str = "medverify-drugs"
+    ENVIRONMENT: str
+    LOG_LEVEL: str
+    CORS_ORIGINS: list
 
-    # Server Settings
-    ENVIRONMENT: str = "development"
-    LOG_LEVEL: str = "INFO"
-    CORS_ORIGINS: List[str] = ["*"]
+    def __getattr__(self, name: str):
+        val = os.getenv(name)
+        if name == "AWS_REGION" and not val:
+            return "us-east-1"
+        if name == "CORS_ORIGINS":
+            try:
+                return json.loads(val) if val else ["*"]
+            except Exception:
+                return ["*"]
+        if val is not None and (val.startswith("[") or val.startswith("{")):
+            try:
+                return json.loads(val)
+            except Exception:
+                pass
+        return val
 
-    model_config = SettingsConfigDict(
-        env_file=(str(ENV_PATH), ".env"),
-        env_file_encoding="utf-8",
-        extra="ignore"
-    )
+    def get(self, name: str, default=None):
+        val = getattr(self, name, None)
+        return val if val is not None else default
+
 
 settings = Settings()

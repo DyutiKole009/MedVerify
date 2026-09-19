@@ -1,3 +1,0 @@
-"""
-AWS Wrapper Unit Tests.
-"""
