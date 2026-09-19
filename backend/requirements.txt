@@ -12,3 +12,4 @@ moto>=5.0.0
 strands-agents>=1.0.0
 langgraph>=0.2.0
 langchain-aws>=0.2.0
+beautifulsoup4>=4.12.0
