@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Search, Camera, X, ArrowRight, Loader2, Sparkles, Image as ImageIcon } from 'lucide-react';
+import { Search, Camera, X, ArrowRight, Loader2 } from 'lucide-react';
 
 interface OmniboxProps {
   onSearch: (text: string, imageFile?: File) => void;
@@ -32,19 +32,6 @@ export const Omnibox: React.FC<OmniboxProps> = ({ onSearch, isLoading }) => {
     e.preventDefault();
     if (!query.trim() && !imageFile) return;
     onSearch(query.trim(), imageFile || undefined);
-  };
-
-  const setSample = (text: string, withMockImage: boolean = false) => {
-    setQuery(text);
-    if (withMockImage) {
-      // Mock File object for demonstration
-      const blob = new Blob(['mock-packaging-bytes'], { type: 'image/jpeg' });
-      const file = new File([blob], 'packaging_sample.jpg', { type: 'image/jpeg' });
-      setImageFile(file);
-      setImagePreview('https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=400&auto=format&fit=crop&q=80');
-    } else {
-      handleRemoveImage();
-    }
   };
 
   return (
@@ -138,54 +125,6 @@ export const Omnibox: React.FC<OmniboxProps> = ({ onSearch, isLoading }) => {
         </div>
       </form>
 
-      {/* Quick Interactive Samples */}
-      <div className="mt-3 flex flex-wrap items-center gap-2 px-1">
-        <span className="text-xs font-semibold text-slate-400 flex items-center space-x-1">
-          <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-          <span>Try Samples:</span>
-        </span>
-
-        <button
-          type="button"
-          onClick={() => setSample('B-9021')}
-          className="text-xs px-2.5 py-1 rounded-full bg-slate-100 hover:bg-amber-50 hover:text-amber-700 text-slate-600 font-mono transition border border-slate-200/60"
-        >
-          Batch B-9021 (NSQ Alert)
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setSample('SPUR-7788')}
-          className="text-xs px-2.5 py-1 rounded-full bg-slate-100 hover:bg-red-50 hover:text-red-700 text-slate-600 font-mono transition border border-slate-200/60"
-        >
-          Batch SPUR-7788 (Spurious Fake)
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setSample('CLEAN-BATCH-101')}
-          className="text-xs px-2.5 py-1 rounded-full bg-slate-100 hover:bg-emerald-50 hover:text-emerald-700 text-slate-600 font-mono transition border border-slate-200/60"
-        >
-          Clean Batch Sample
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setSample('The print on this strip is smudged and tablets caused acute nausea and severe dizziness', false)}
-          className="text-xs px-2.5 py-1 rounded-full bg-slate-100 hover:bg-purple-50 hover:text-purple-700 text-slate-600 transition border border-slate-200/60"
-        >
-          Symptom Suspicion (Deep Agent)
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setSample('Batch NX102 Paracetamol', true)}
-          className="text-xs px-2.5 py-1 rounded-full bg-slate-100 hover:bg-sky-50 hover:text-sky-700 text-slate-600 transition border border-slate-200/60 flex items-center space-x-1"
-        >
-          <ImageIcon className="w-3 h-3 text-sky-500" />
-          <span>Packaging Photo Scan</span>
-        </button>
-      </div>
     </div>
   );
 };

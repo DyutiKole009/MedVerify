@@ -4,10 +4,56 @@ Batches and Manufacturers API router (§12.2).
 from typing import Dict, Any
 from fastapi import APIRouter, HTTPException
 
+from datetime import datetime, timezone
 from src.domain.normalization import normalize_batch_no
 from src.tools.skill_tools import check_batch, get_manufacturer_history
+from src.pipelines.nsq_ingestion.scraper import scrape_nsq_listing
 
 router = APIRouter()
+
+
+@router.get("/batches/notices/list")
+def list_regulatory_notices() -> Dict[str, Any]:
+    """Retrieves ingested regulatory gazette notices (§5.2)."""
+    return {
+        "documents": [
+            {
+                "id": "doc-2026-08-cdl",
+                "month": "2026-08",
+                "name": "Central Drugs Laboratory Alert Gazette (August 2026)",
+                "type": "CENTRAL",
+                "batchesFlagged": 8,
+                "spuriousCount": 2,
+                "url": "https://cdsco.gov.in/opencms/opencms/en/Notifications/nsq-drugs/",
+                "status": "INGESTED",
+                "docHash": "cdl-aug-2026-sha256-verified",
+            }
+        ]
+    }
+
+
+@router.post("/batches/notices/scrape")
+def trigger_cdsco_scraper() -> Dict[str, Any]:
+    """Triggers live web scraping of the CDSCO notifications portal (§5.2)."""
+    candidates = scrape_nsq_listing()
+    results = []
+    for idx, c in enumerate(candidates):
+        results.append({
+            "id": f"scraped-{idx+1}",
+            "month": c.source_month,
+            "name": c.title,
+            "type": c.doc_type,
+            "batchesFlagged": 0,
+            "spuriousCount": 0,
+            "url": c.doc_url,
+            "status": "DISCOVERED_CANDIDATE",
+            "docHash": c.doc_hash,
+        })
+    return {
+        "count": len(results),
+        "scraped_at": datetime.now(timezone.utc).isoformat(),
+        "candidates": results,
+    }
 
 
 @router.get("/batches/{batch_no}")

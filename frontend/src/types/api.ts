@@ -56,6 +56,8 @@ export interface VerificationResponse {
     mfg_date?: string;
     ocr_confidence?: number;
   };
+  image_url?: string;
+  input_type?: 'TEXT' | 'IMAGE';
 }
 
 export interface PresignUploadResponse {

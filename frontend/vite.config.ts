@@ -1,21 +1,27 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 
 // https://vite.dev/config/
-export default defineConfig({
-  plugins: [react()],
-  server: {
-    port: 3000,
-    proxy: {
-      '/check': 'http://localhost:8000',
-      '/investigate': 'http://localhost:8000',
-      '/sessions': 'http://localhost:8000',
-      '/reports': 'http://localhost:8000',
-      '/uploads': 'http://localhost:8000',
-      '/batches': 'http://localhost:8000',
-      '/manufacturers': 'http://localhost:8000',
-      '/admin': 'http://localhost:8000',
-      '/health': 'http://localhost:8000',
-    }
-  }
-})
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, '.', '')
+  const proxyTarget = env.VITE_DEV_API_TARGET || 'http://127.0.0.1:8000'
+
+  return {
+    plugins: [react()],
+    server: {
+      port: 3000,
+      proxy: {
+        '/check': { target: proxyTarget, changeOrigin: true },
+        '/investigate': { target: proxyTarget, changeOrigin: true },
+        '/sessions': { target: proxyTarget, changeOrigin: true },
+        '/reports': { target: proxyTarget, changeOrigin: true },
+        '/uploads': { target: proxyTarget, changeOrigin: true },
+        '/batches': { target: proxyTarget, changeOrigin: true },
+        '/manufacturers': { target: proxyTarget, changeOrigin: true },
+        '/admin': { target: proxyTarget, changeOrigin: true },
+        '/health': { target: proxyTarget, changeOrigin: true },
+      },
+    },
+  };
+});
+

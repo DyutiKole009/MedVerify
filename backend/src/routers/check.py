@@ -55,8 +55,12 @@ def run_quick_check(
         status_category = "NO_MATCH"
     elif batch_record and batch_record.get("alert_status") == "SPURIOUS":
         status_category = "SPURIOUS"
+    elif batch_record and batch_record.get("alert_status") == "NSQ":
+        status_category = "NSQ"
     elif community_flag:
         status_category = "COMMUNITY_FLAGGED"
+    elif batch_record and batch_record.get("alert_status"):
+        status_category = batch_record.get("alert_status")
     else:
         status_category = "MATCH_FOUND"
 

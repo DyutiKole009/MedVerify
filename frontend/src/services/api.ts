@@ -1,7 +1,7 @@
 import { getAnonymousId } from './session';
 import type { VerificationResponse } from '../types/api';
 
-const API_BASE = ''; // Uses Vite reverse proxy in development
+const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
 export interface UnifiedQuery {
   text?: string;
@@ -40,12 +40,12 @@ export async function submitVerification(query: UnifiedQuery): Promise<Verificat
             headers: { 'Content-Type': query.imageFile.type || 'image/jpeg' },
             body: query.imageFile,
           });
-        } catch {
-          // If local mock or presigned fails, proceed with the key
+        } catch (error) {
+          throw new Error(`Image upload failed: ${error instanceof Error ? error.message : 'unknown error'}`);
         }
       }
-    } catch (err) {
-      console.warn('Presign upload warning:', err);
+    } catch (error) {
+      throw error instanceof Error ? error : new Error('Image upload preparation failed');
     }
   }
 
@@ -69,53 +69,27 @@ export async function submitVerification(query: UnifiedQuery): Promise<Verificat
         image_s3_key: imageS3Key,
       }),
     });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Deep investigation failed');
     const data = await res.json();
     return {
       session_id: data.session_id,
-      status_category: 'COMMUNITY_FLAGGED',
-      summary: `Autonomous Deep Investigation initialized for: "${textQuery}". Agent reasoning across Bedrock Knowledge Base and memory initiated.`,
-      disclaimer: 'Absence of a flag is not proof of safety.',
-      orchestrator_tier: 'DEEP',
-      orchestrator_reasoning: data.orchestrator_decision?.reasoning || 'Complex unstructured inquiry with potential safety/counterfeit indications.',
-      reasoning_trace: [
-        'Classified as Deep Autonomous Investigation',
-        'Retrieving related NSQ regulatory notices from Bedrock Knowledge Base',
-        'Comparing against historical cases and community reports',
-        'Formulating clinical evidence synthesis',
-      ],
-      community_flag: true,
+      ...data,
     };
   }
 
-  if (imageS3Key || query.imageFile) {
+  if (imageS3Key) {
     const res = await fetch(`${API_BASE}/investigate`, {
       method: 'POST',
       headers,
       body: JSON.stringify({
-        image_s3_key: imageS3Key || 'mock-packaging.jpg',
+        image_s3_key: imageS3Key,
         notes: textQuery,
       }),
     });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Image investigation failed');
     const data = await res.json();
     return {
-      session_id: data.session_id,
-      status_category: 'CLEAR',
-      summary: 'Packaging photo analysis complete. Batch identifiers extracted and cross-checked with CDSCO central repository.',
-      disclaimer: 'Absence of a flag is not proof of safety.',
-      orchestrator_tier: 'REACTIVE',
-      orchestrator_reasoning: data.orchestrator_decision?.reasoning || 'Image upload detected. Dispatched to 5-step Reactive pipeline.',
-      reasoning_trace: [
-        'Amazon Textract / Bedrock OCR extracted package typography',
-        'Normalized batch numbers and manufacturer name',
-        'Ran parallel verification against CDSCO Batches, Manufacturers, and Reports',
-        'Synthesized final evidence record',
-      ],
-      community_flag: false,
-      extracted_fields: {
-        batch_no: query.batchNo || 'B-9021',
-        drug_name: query.drugName || 'Paracetamol 500mg',
-        ocr_confidence: 0.96,
-      },
+      ...data,
     };
   }
 
@@ -135,8 +109,41 @@ export async function submitVerification(query: UnifiedQuery): Promise<Verificat
     throw new Error(err.detail || 'Verification request failed');
   }
 
-  return await res.json();
+  const raw = await res.json();
+  const decision = raw.orchestrator_decision;
+  const officialRecord = raw.batch_record || raw.official_record || null;
+  const tier = raw.orchestrator_tier || decision?.selected_tier || decision?.target_tier || 'SKILL';
+  const statusCat =
+    raw.status_category === 'MATCH_FOUND' && officialRecord?.alert_status
+      ? officialRecord.alert_status
+      : raw.status_category;
+
+  return {
+    ...raw,
+    session_id: raw.session_id,
+    status_category: statusCat,
+    summary:
+      raw.summary ||
+      (officialRecord
+        ? `Batch ${officialRecord.batch_no} (${officialRecord.drug_name}) flagged as ${officialRecord.alert_status}: ${officialRecord.nsq_reason || 'Official CDSCO alert recorded'}.`
+        : `No regulatory quality failure or spurious notice recorded for ${query.batchNo || textQuery || 'the requested item'}.`),
+    official_record: officialRecord,
+    community_flag: Boolean(raw.community_flag),
+    disclaimer: raw.disclaimer || raw.limitation_statement || 'Absence of a flag is not proof of safety.',
+    orchestrator_tier: tier,
+    orchestrator_reasoning:
+      raw.orchestrator_reasoning ||
+      decision?.reasoning ||
+      (decision ? `Classified as ${decision.intent || 'batch_lookup'} (${decision.complexity || 'LOW'} complexity).` : undefined),
+    reasoning_trace: raw.reasoning_trace || [
+      `Step 1: Orchestrator classified query as ${decision?.intent || 'batch_lookup'} -> routed to ${tier} tier.`,
+      `Step 2: Queried CDSCO official batches registry for batch '${query.batchNo || textQuery}'.`,
+      `Step 3: ${officialRecord ? `Match found with status ${officialRecord.alert_status}.` : 'No matching regulatory quality alert recorded in CDSCO repository.'}`,
+      `Step 4: Checked community signals -> ${raw.community_flag ? 'community flags present' : 'no active community reports'}.`,
+    ],
+  };
 }
+
 
 export async function submitFeedback(sessionId: string, helpful: boolean, comment?: string): Promise<boolean> {
   const anonId = getAnonymousId();
@@ -162,14 +169,11 @@ export async function submitCommunityReport(report: {
   issue_type: string;
   description: string;
 }): Promise<boolean> {
-  // Uses demo token or anonymous header for reporting
   try {
     const res = await fetch(`${API_BASE}/reports`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        // Mock authorization token for demo submission
-        Authorization: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkZW1vLXVzZXIiLCJlbWFpbCI6ImRlbW9AbWVkdmVyaWZ5Lm9yZyIsImN1c3RvbTpyb2xlIjoiY29uc3VtZXIifQ.mock',
       },
       body: JSON.stringify(report),
     });
@@ -188,3 +192,29 @@ export async function getManufacturerDetails(manufacturerId: string) {
     return null;
   }
 }
+
+export async function getRegulatoryNotices() {
+  try {
+    const res = await fetch(`${API_BASE}/batches/notices/list`);
+    if (res.ok) {
+      const data = await res.json();
+      return data.documents || [];
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+export async function triggerWebScraper() {
+  const res = await fetch(`${API_BASE}/batches/notices/scrape`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) {
+    throw new Error('Failed to scrape CDSCO portal');
+  }
+  return await res.json();
+}
+

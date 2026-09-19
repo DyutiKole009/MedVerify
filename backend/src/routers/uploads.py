@@ -3,7 +3,7 @@ Uploads API router (§12.2 POST /uploads/presign).
 """
 import uuid
 from fastapi import APIRouter
-from botocore.exceptions import ClientError
+from fastapi import HTTPException, status
 
 from src.models.schemas import PresignUploadRequest, PresignUploadResponse
 from src.tools.aws import get_s3_client
@@ -33,9 +33,11 @@ def get_presigned_upload_url(request: PresignUploadRequest) -> PresignUploadResp
             },
             ExpiresIn=3600,
         )
-    except Exception:
-        # Fallback URL if credentials are mock/local
-        url = f"https://{settings.S3_UPLOADS_BUCKET}.s3.amazonaws.com/{s3_key}?mock_presign_token=1"
+    except Exception as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to create an upload URL",
+        ) from error
 
     return PresignUploadResponse(
         upload_url=url,

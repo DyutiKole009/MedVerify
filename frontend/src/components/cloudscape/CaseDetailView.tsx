@@ -177,22 +177,33 @@ export const CaseDetailView: React.FC<CaseDetailViewProps> = ({
           }
         >
           <SpaceBetween size="m">
-            <div className="rounded-xl overflow-hidden border border-slate-200 bg-slate-100 p-2 text-center">
-              <img
-                src="https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=600&auto=format&fit=crop&q=80"
-                alt="Packaging inspection"
-                className="rounded-lg max-h-56 mx-auto object-cover"
-              />
-              <Box variant="small" color="text-body-secondary" margin={{ top: 'xs' }}>
-                Extracted via Amazon Textract / Bedrock Multimodal Vision
-              </Box>
-            </div>
+            {result.image_url ? (
+              <div className="rounded-xl border border-slate-200 overflow-hidden bg-slate-900 flex justify-center items-center max-h-64 p-2">
+                <img
+                  src={result.image_url}
+                  alt="Packaging Artifact"
+                  className="max-h-60 max-w-full object-contain rounded-lg shadow-sm"
+                />
+              </div>
+            ) : (
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-6 text-center">
+                <Box variant="strong" color="text-body-secondary">
+                  Direct Batch Code Lookup
+                </Box>
+                <Box variant="small" color="text-body-secondary" margin={{ top: 'xxs' }}>
+                  No packaging photo was attached with this query.
+                </Box>
+                <Box variant="small" color="text-body-secondary" margin={{ top: 's' }}>
+                  Tip: Attach an image of the medicine strip/box to activate Amazon Textract OCR, barcode decoding, and Bedrock Multimodal Vision packaging analysis.
+                </Box>
+              </div>
+            )}
 
             <KeyValuePairs
               columns={2}
               items={[
                 {
-                  label: 'Extracted Batch ID',
+                  label: result.image_url ? 'Extracted Batch ID' : 'Queried Batch ID',
                   value: (
                     <Box variant="code">
                       {result.extracted_fields?.batch_no || result.official_record?.batch_no || 'N/A'}
@@ -200,18 +211,22 @@ export const CaseDetailView: React.FC<CaseDetailViewProps> = ({
                   ),
                 },
                 {
-                  label: 'Composition / Drug',
+                  label: result.image_url ? 'Composition / Drug' : 'Matched Drug',
                   value: result.extracted_fields?.drug_name || result.official_record?.drug_name || 'N/A',
                 },
                 {
-                  label: 'Manufacturer',
+                  label: result.image_url ? 'Manufacturer' : 'Licensed Manufacturer',
                   value: result.extracted_fields?.manufacturer || result.official_record?.manufacturer_name || 'N/A',
                 },
                 {
-                  label: 'OCR Confidence',
-                  value: (
+                  label: result.image_url ? 'OCR Confidence' : 'Input Verification',
+                  value: result.image_url ? (
                     <StatusIndicator type="success">
                       {result.extracted_fields?.ocr_confidence ? `${Math.round(result.extracted_fields.ocr_confidence * 100)}%` : 'Verified 96%'}
+                    </StatusIndicator>
+                  ) : (
+                    <StatusIndicator type="info">
+                      Direct Registry Match (No OCR)
                     </StatusIndicator>
                   ),
                 },

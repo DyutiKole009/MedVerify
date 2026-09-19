@@ -23,6 +23,7 @@ export interface CaseRecord {
   status: string;
   tier: 'SKILL' | 'REACTIVE' | 'DEEP';
   timestamp: string;
+  imageUrl?: string;
   result: VerificationResponse;
 }
 
@@ -46,17 +47,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     if (e) e.preventDefault();
     if (!queryText.trim() && files.length === 0) return;
     onVerify(queryText.trim(), files[0]);
-  };
-
-  const handleSample = (sampleText: string, mockPhoto: boolean = false) => {
-    setQueryText(sampleText);
-    if (mockPhoto) {
-      const blob = new Blob(['mock-packaging'], { type: 'image/jpeg' });
-      const f = new File([blob], 'paracetamol_strip.jpg', { type: 'image/jpeg' });
-      setFiles([f]);
-    } else {
-      setFiles([]);
-    }
   };
 
   const getStatusIndicator = (status: string) => {
@@ -101,7 +91,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       <ColumnLayout columns={4} variant="text-grid">
         <Container>
           <Box variant="awsui-key-label">Active Verifications</Box>
-          <Box variant="awsui-value-large">{recentCases.length + 14}</Box>
+          <Box variant="awsui-value-large">{recentCases.length}</Box>
           <Box variant="small" color="text-status-success">
             All tiers operational
           </Box>
@@ -109,7 +99,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
         <Container>
           <Box variant="awsui-key-label">CDSCO Flagged Batches</Box>
-          <Box variant="awsui-value-large">1,284</Box>
+          <Box variant="awsui-value-large">-</Box>
           <Box variant="small" color="text-body-secondary">
             Sourced from CDSCO Gazettes
           </Box>
@@ -117,7 +107,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
         <Container>
           <Box variant="awsui-key-label">Spurious / Counterfeit Alerts</Box>
-          <Box variant="awsui-value-large">42</Box>
+          <Box variant="awsui-value-large">-</Box>
           <Box variant="small" color="text-status-error">
             Critical safety alerts
           </Box>
@@ -125,7 +115,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
         <Container>
           <Box variant="awsui-key-label">Community Incident Reports</Box>
-          <Box variant="awsui-value-large">18</Box>
+          <Box variant="awsui-value-large">-</Box>
           <Box variant="small" color="text-status-info">
             Verified patient signals
           </Box>
@@ -175,7 +165,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <Button
                   variant="primary"
                   loading={isLoading}
-                  onClick={() => handleSubmit()}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    handleSubmit();
+                  }}
                   disabled={!queryText.trim() && files.length === 0}
                 >
                   Verify Medicine
@@ -184,44 +177,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </SpaceBetween>
           </form>
 
-          {/* Sample Query Chips */}
-          <Box>
-            <SpaceBetween direction="horizontal" size="xs">
-              <Box variant="small" color="text-body-secondary" margin={{ top: 'xxs' }}>
-                Quick Samples:
-              </Box>
-              <Button
-                variant="inline-link"
-                onClick={() => handleSample('B-9021')}
-              >
-                Batch B-9021 (NSQ Alert)
-              </Button>
-              <Button
-                variant="inline-link"
-                onClick={() => handleSample('SPUR-7788')}
-              >
-                Batch SPUR-7788 (Spurious Fake)
-              </Button>
-              <Button
-                variant="inline-link"
-                onClick={() => handleSample('CLEAN-BATCH-101')}
-              >
-                Clean Batch Sample
-              </Button>
-              <Button
-                variant="inline-link"
-                onClick={() => handleSample('Patient took batch NX102 and developed acute dizziness with blurred vision')}
-              >
-                Symptom Suspicion (Deep Agent)
-              </Button>
-              <Button
-                variant="inline-link"
-                onClick={() => handleSample('Paracetamol 500mg Batch B-9021', true)}
-              >
-                Packaging Photo Scan (Reactive Agent)
-              </Button>
-            </SpaceBetween>
-          </Box>
         </SpaceBetween>
       </Container>
 

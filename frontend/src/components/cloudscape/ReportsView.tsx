@@ -42,35 +42,15 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     setModalVisible(isModalOpen);
   }, [isModalOpen]);
 
-  const reports = [
-    {
-      id: 'REP-901',
-      batchNo: 'B-9021',
-      drugName: 'Paracetamol 500mg',
-      issueType: 'PACKAGING_DEFECT',
-      description: 'The blister strip foil is loose and text on the back is misaligned.',
-      date: '2024-05-18',
-      status: 'VERIFIED',
-    },
-    {
-      id: 'REP-902',
-      batchNo: 'SPUR-7788',
-      drugName: 'Amoxicillin 250mg',
-      issueType: 'SUSPECTED_COUNTERFEIT',
-      description: 'Tablets crumbled into white powder with abnormal acidic smell upon opening.',
-      date: '2024-05-15',
-      status: 'FLAGGED',
-    },
-    {
-      id: 'REP-903',
-      batchNo: 'NX102',
-      drugName: 'Cough Syrup 100ml',
-      issueType: 'ADVERSE_REACTION',
-      description: 'Severe throat irritation and rash reported within 30 minutes of dosage.',
-      date: '2024-05-11',
-      status: 'INVESTIGATING',
-    },
-  ];
+  const reports: Array<{
+    id: string;
+    batchNo: string;
+    drugName: string;
+    issueType: string;
+    description: string;
+    date: string;
+    status: string;
+  }> = [];
 
   const handleClose = () => {
     setModalVisible(false);
