@@ -1,6 +1,7 @@
 """
 Central configuration for MedVerify backend loaded directly from .env using python-dotenv.
 """
+
 import os
 import json
 from pathlib import Path
