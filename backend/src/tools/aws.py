@@ -43,6 +43,16 @@ def get_bedrock_agent_runtime_client():
     return get_boto_session().client("bedrock-agent-runtime")
 
 
+def get_rekognition_client():
+    """Returns Amazon Rekognition client configured from env."""
+    return get_boto_session().client("rekognition")
+
+
+def get_textract_client():
+    """Returns Amazon Textract client configured from env."""
+    return get_boto_session().client("textract")
+
+
 def get_agentcore_client():
     """Returns Bedrock AgentCore Memory client from env."""
     return get_boto_session().client("bedrock-agentcore")

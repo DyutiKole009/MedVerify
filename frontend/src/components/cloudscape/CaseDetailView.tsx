@@ -219,6 +219,14 @@ export const CaseDetailView: React.FC<CaseDetailViewProps> = ({
                   value: result.extracted_fields?.manufacturer || result.official_record?.manufacturer_name || 'N/A',
                 },
                 {
+                  label: 'Expiry Date',
+                  value: result.extracted_fields?.expiry_date || result.official_record?.expiry_date || 'N/A',
+                },
+                {
+                  label: 'Manufacturing Date',
+                  value: result.extracted_fields?.mfg_date || result.official_record?.mfg_date || 'N/A',
+                },
+                {
                   label: result.image_url ? 'OCR Confidence' : 'Input Verification',
                   value: result.image_url ? (
                     <StatusIndicator type="success">

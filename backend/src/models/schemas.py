@@ -36,6 +36,11 @@ class ProcessingResponse(BaseModel):
     session_id: str
     status: str = "PROCESSING"
     orchestrator_decision: Optional[Dict[str, Any]] = None
+    extracted_fields: Optional[Dict[str, Any]] = None
+    batch_record: Optional[Dict[str, Any]] = None
+    status_category: Optional[str] = None
+    summary: Optional[str] = None
+    reasoning_trace: Optional[List[str]] = None
 
 
 class FeedbackRequest(BaseModel):

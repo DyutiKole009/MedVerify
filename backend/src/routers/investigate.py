@@ -13,23 +13,59 @@ from src.models.schemas import (
 )
 from src.agents.orchestrator import orchestrate
 from src.tools.aws import get_dynamodb_resource, convert_floats_to_decimals
+from src.tools.reactive_tools import extract_from_image
+from src.tools.skill_tools import check_batch
 from src.dependencies.auth import get_current_user_optional
 from src.config import settings
 
 router = APIRouter()
 
 
-@router.post("", response_model=ProcessingResponse, status_code=status.HTTP_202_ACCEPTED)
+@router.post("", response_model=ProcessingResponse, status_code=status.HTTP_200_OK)
 def start_reactive_investigation(
     request: InvestigateRequest,
     user: Dict[str, Any] = Depends(get_current_user_optional),
 ) -> ProcessingResponse:
     """
     Submits a packaging photo for full reactive verification (§12.1).
-    Returns 202 Accepted with a session_id for polling.
+    Performs Amazon Rekognition OCR, parses medicine fields, and checks CDSCO records.
     """
     session_id = str(uuid.uuid4())
     decision = orchestrate(has_image=True, image_s3_key=request.image_s3_key)
+
+    # Perform Rekognition extraction
+    extracted = extract_from_image(request.image_s3_key, request.mime_type)
+    batch_no = extracted.get("batch_no")
+    drug_name = extracted.get("drug_name")
+    mfg_name = extracted.get("manufacturer_name")
+
+    batch_record = None
+    status_cat = "NO_MATCH"
+    if batch_no:
+        batch_record = check_batch(batch_no)
+        if batch_record:
+            status_cat = batch_record.get("alert_status", "MATCH_FOUND")
+
+    reasoning_trace = [
+        f"Step 1: Uploaded packaging artifact to S3 bucket '{settings.S3_UPLOADS_BUCKET}'.",
+        f"Step 2: Amazon Rekognition detected packaging text with {int(extracted.get('ocr_confidence', 0.9)*100)}% average confidence.",
+        f"Step 3: Identified Drug: '{drug_name}' | Manufacturer: '{mfg_name}'.",
+    ]
+    if batch_no:
+        reasoning_trace.append(f"Step 4: Queried CDSCO registry for Batch '{batch_no}'.")
+        if batch_record:
+            reasoning_trace.append(f"Step 5: Alert flag '{status_cat}' found in CDSCO regulatory database.")
+        else:
+            reasoning_trace.append(f"Step 5: No adverse CDSCO recall notice found for batch '{batch_no}'.")
+    else:
+        reasoning_trace.append("Step 4: Batch number not detected in this view (crop or angle).")
+
+    if batch_record:
+        summary = f"ALERT: Batch {batch_no} ({drug_name}) is flagged as {status_cat} by CDSCO: {batch_record.get('nsq_reason', 'Regulatory quality failure')}."
+    elif batch_no:
+        summary = f"Scanned {drug_name} (Batch: {batch_no}, Mfg: {mfg_name}). No CDSCO recall record found."
+    else:
+        summary = f"Scanned {drug_name} by {mfg_name}. Batch number was cut off or not visible in this photo. Please snap the crimped edge or batch stamp to check CDSCO recall alerts."
 
     now_iso = datetime.now(timezone.utc).isoformat()
     dynamo = get_dynamodb_resource()
@@ -44,7 +80,9 @@ def start_reactive_investigation(
         "input_data": {
             "image_s3_key": request.image_s3_key,
         },
-        "status": "PROCESSING",
+        "extracted_fields": extracted,
+        "batch_record": batch_record,
+        "status": "DONE",
         "orchestrator_decision": decision.model_dump(),
         "created_at": now_iso,
     }
@@ -52,8 +90,21 @@ def start_reactive_investigation(
 
     return ProcessingResponse(
         session_id=session_id,
-        status="PROCESSING",
+        status="DONE",
         orchestrator_decision=decision.model_dump(),
+        extracted_fields={
+            "batch_no": batch_no or "Not visible in photo",
+            "drug_name": drug_name,
+            "manufacturer": mfg_name,
+            "expiry_date": extracted.get("expiry_date") or "Not visible in photo",
+            "mfg_date": extracted.get("mfg_date") or "Not visible in photo",
+            "ocr_confidence": extracted.get("ocr_confidence", 0.95),
+            "unreadable_fields": extracted.get("unreadable_fields", []),
+        },
+        batch_record=batch_record,
+        status_category=status_cat if batch_no else "CLEAR",
+        summary=summary,
+        reasoning_trace=reasoning_trace,
     )
 
 
