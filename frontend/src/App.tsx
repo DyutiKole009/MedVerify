@@ -1,226 +1,196 @@
-import { useState, useEffect } from 'react';
-import { Sparkles, Loader2 } from 'lucide-react';
-import { Navbar } from './components/Navbar';
-import { Omnibox } from './components/Omnibox';
-import { OrchestratorTrace } from './components/OrchestratorTrace';
-import { StatusBanner } from './components/StatusBanner';
-import { EvidenceCards } from './components/EvidenceCards';
-import { ManufacturerCard } from './components/ManufacturerCard';
-import { DeepReasoningView } from './components/DeepReasoningView';
-import { FeedbackWidget } from './components/FeedbackWidget';
-import { ReportModal } from './components/ReportModal';
-import { HistoryDrawer } from './components/HistoryDrawer';
+import { useState } from 'react';
+import AppLayout from '@cloudscape-design/components/app-layout';
+import { TopNav } from './components/cloudscape/TopNav';
+import { Navigation } from './components/cloudscape/Navigation';
+import { DashboardView } from './components/cloudscape/DashboardView';
+import type { CaseRecord } from './components/cloudscape/DashboardView';
+import { CaseDetailView } from './components/cloudscape/CaseDetailView';
+import { DocumentsView } from './components/cloudscape/DocumentsView';
+import { ReportsView } from './components/cloudscape/ReportsView';
+import { AnalyticsView } from './components/cloudscape/AnalyticsView';
+import { ToolsDrawer } from './components/cloudscape/ToolsDrawer';
 import { submitVerification } from './services/api';
 import type { VerificationResponse } from './types/api';
 
-interface HistoryItem {
-  query: string;
-  result: VerificationResponse;
-  timestamp: string;
-}
+const DEFAULT_CASES: CaseRecord[] = [
+  {
+    id: 'MV-1024',
+    query: 'B-9021',
+    batchNo: 'B-9021',
+    drugName: 'Paracetamol 500mg',
+    status: 'NSQ',
+    tier: 'SKILL',
+    timestamp: 'Just now',
+    result: {
+      session_id: '8f03c0b2-4d29-4d6b-9c7a-9a9446f25dc1',
+      status_category: 'NSQ',
+      summary: 'Fails dissolution and assay standards according to CDSCO May 2024 Gazette.',
+      disclaimer: 'Absence of a flag is not proof of safety.',
+      orchestrator_tier: 'SKILL',
+      orchestrator_reasoning: 'Direct batch check without image upload.',
+      community_flag: false,
+      community_report_count: 0,
+      official_record: {
+        batch_no: 'B-9021',
+        drug_name: 'Paracetamol 500mg',
+        manufacturer_name: 'Acme Pharmaceuticals Ltd, Plot 14, Solan (HP)',
+        alert_status: 'NSQ',
+        nsq_reason: 'Fails dissolution test (active ingredient release below standard limits)',
+        source_month: '2024-05',
+        source_document_s3_key: 'notices/2024-05-central.pdf',
+      },
+    },
+  },
+  {
+    id: 'MV-1023',
+    query: 'SPUR-7788',
+    batchNo: 'SPUR-7788',
+    drugName: 'Amoxicillin 250mg Capsules',
+    status: 'SPURIOUS',
+    tier: 'REACTIVE',
+    timestamp: '15 min ago',
+    result: {
+      session_id: '3c19b882-9912-4aa1-8012-781912882319',
+      status_category: 'SPURIOUS',
+      summary: 'Manufactured by fictitious entity; declared spurious counterfeit medicine by regulatory authorities.',
+      disclaimer: 'Absence of a flag is not proof of safety.',
+      orchestrator_tier: 'REACTIVE',
+      orchestrator_reasoning: 'Packaging photo analysis detected invalid licensing number.',
+      community_flag: true,
+      community_report_count: 3,
+      official_record: {
+        batch_no: 'SPUR-7788',
+        drug_name: 'Amoxicillin 250mg Capsules',
+        manufacturer_name: 'Non-Existent Fictitious Laboratories, Roorkee',
+        alert_status: 'SPURIOUS',
+        nsq_reason: 'Product does not contain stated active pharmaceutical ingredient (spurious)',
+        source_month: '2024-04',
+      },
+    },
+  },
+  {
+    id: 'MV-1022',
+    query: 'CLEAN-101',
+    batchNo: 'CLEAN-101',
+    drugName: 'Pantoprazole Gastro-Resistant Tablets',
+    status: 'CLEAR',
+    tier: 'SKILL',
+    timestamp: '1 hr ago',
+    result: {
+      session_id: '1a902188-7712-4e99-b102-441092817291',
+      status_category: 'CLEAR',
+      summary: 'No regulatory quality alert or spurious flag recorded in CDSCO repository.',
+      disclaimer: 'Absence of a flag is not proof of safety.',
+      orchestrator_tier: 'SKILL',
+      orchestrator_reasoning: 'Single deterministic lookup completed.',
+      community_flag: false,
+      community_report_count: 0,
+      official_record: null,
+    },
+  },
+];
 
 export function App() {
+  const [activeNav, setActiveNav] = useState('#dashboard');
+  const [selectedCase, setSelectedCase] = useState<CaseRecord | null>(null);
+  const [cases, setCases] = useState<CaseRecord[]>(DEFAULT_CASES);
   const [isLoading, setIsLoading] = useState(false);
-  const [currentResult, setCurrentResult] = useState<VerificationResponse | null>(null);
-  const [currentQuery, setCurrentQuery] = useState<string>('');
-  const [error, setError] = useState<string | null>(null);
-  const [isReportOpen, setIsReportOpen] = useState(false);
-  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-  const [history, setHistory] = useState<HistoryItem[]>(() => {
-    try {
-      const saved = localStorage.getItem('medverify_history');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [isToolsOpen, setIsToolsOpen] = useState(false);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem('medverify_history', JSON.stringify(history));
-    } catch {
-      // Ignore quota errors
-    }
-  }, [history]);
-
-  const handleSearch = async (text: string, imageFile?: File) => {
+  const handleVerify = async (queryText: string, file?: File) => {
     setIsLoading(true);
-    setError(null);
-    setCurrentQuery(text || (imageFile ? imageFile.name : 'Packaging Check'));
-
     try {
-      const result = await submitVerification({
-        text,
-        imageFile,
-        batchNo: text && text.trim().length <= 15 ? text.trim() : undefined,
+      const result: VerificationResponse = await submitVerification({
+        text: queryText,
+        imageFile: file,
+        batchNo: queryText && queryText.length <= 15 ? queryText : undefined,
       });
 
-      setCurrentResult(result);
-
-      // Save to local history
-      const newItem: HistoryItem = {
-        query: text || imageFile?.name || 'Inspection',
+      const newCase: CaseRecord = {
+        id: `MV-${1025 + cases.length}`,
+        query: queryText || file?.name || 'Inspection',
+        batchNo: result.official_record?.batch_no || (queryText.length <= 15 ? queryText : 'Extracted'),
+        drugName: result.official_record?.drug_name || queryText || 'Packaging Scan',
+        status: result.status_category,
+        tier: result.orchestrator_tier,
+        timestamp: 'Just now',
         result,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
-      setHistory((prev) => [newItem, ...prev.slice(0, 19)]);
-    } catch (err: any) {
-      console.error('Search error:', err);
-      setError(err.message || 'Verification could not be completed. Please try again.');
+
+      setCases([newCase, ...cases]);
+      setSelectedCase(newCase);
+    } catch (err) {
+      console.error('Verification error:', err);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleClearHistory = () => {
-    setHistory([]);
-    localStorage.removeItem('medverify_history');
+  const handleInspectCase = (c: CaseRecord) => {
+    setSelectedCase(c);
+  };
+
+  const handleBackToDashboard = () => {
+    setSelectedCase(null);
+    setActiveNav('#dashboard');
+  };
+
+  const renderContent = () => {
+    if (selectedCase) {
+      return (
+        <CaseDetailView
+          caseId={selectedCase.id}
+          result={selectedCase.result}
+          onBack={handleBackToDashboard}
+          onOpenReportModal={() => setActiveNav('#new-report')}
+        />
+      );
+    }
+
+    switch (activeNav) {
+      case '#notices':
+        return <DocumentsView />;
+      case '#reports':
+        return <ReportsView isModalOpen={false} />;
+      case '#new-report':
+        return <ReportsView isModalOpen={true} onCloseModal={() => setActiveNav('#reports')} />;
+      case '#analytics':
+        return <AnalyticsView />;
+      case '#verify':
+      case '#cases':
+      case '#dashboard':
+      default:
+        return (
+          <DashboardView
+            onVerify={handleVerify}
+            onInspectCase={handleInspectCase}
+            isLoading={isLoading}
+            recentCases={cases}
+          />
+        );
+    }
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 selection:bg-sky-500 selection:text-white">
-      <Navbar
-        onOpenHistory={() => setIsHistoryOpen(true)}
-        onOpenReport={() => setIsReportOpen(true)}
-      />
+    <div className="min-h-screen bg-slate-50">
+      <TopNav onNavigate={(href) => setActiveNav(href)} />
 
-      <main className="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 py-8 sm:py-12 space-y-8">
-        
-        {/* Hero Title & Description */}
-        <div className="text-center max-w-2xl mx-auto space-y-3">
-          <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-sky-50 border border-sky-200 text-sky-700 text-xs font-semibold shadow-sm">
-            <Sparkles className="w-3.5 h-3.5 text-sky-500" />
-            <span>AI Multi-Agent Verification Platform</span>
-          </div>
-
-          <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
-            Verify Any Medicine in Seconds
-          </h1>
-
-          <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
-            Enter a batch number, snap a photo of the packaging, or describe an adverse reaction.
-            Our <strong>intelligent orchestrator</strong> automatically routes your inquiry to the right AI agent.
-          </p>
-        </div>
-
-        {/* Unified Interactive Omnibox (No separate tabs!) */}
-        <Omnibox onSearch={handleSearch} isLoading={isLoading} />
-
-        {/* Loading Stepper / State */}
-        {isLoading && (
-          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm text-center max-w-md mx-auto space-y-3 animate-in fade-in">
-            <Loader2 className="w-8 h-8 animate-spin text-sky-600 mx-auto" />
-            <div>
-              <h4 className="text-sm font-bold text-slate-800">Orchestrating Verification</h4>
-              <p className="text-xs text-slate-500 mt-1">
-                Classifying query intent and checking CDSCO regulatory records...
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* Error Alert */}
-        {error && (
-          <div className="p-4 rounded-2xl bg-red-50 border border-red-200 text-red-800 text-xs sm:text-sm font-medium flex items-center justify-between max-w-3xl mx-auto">
-            <span>{error}</span>
-            <button onClick={() => setError(null)} className="text-xs underline font-semibold ml-2">
-              Dismiss
-            </button>
-          </div>
-        )}
-
-        {/* Verification Results View */}
-        {currentResult && !isLoading && (
-          <div className="space-y-6 animate-in fade-in duration-200">
-            
-            {/* Orchestrator Decision Trace */}
-            <OrchestratorTrace
-              tier={currentResult.orchestrator_tier}
-              reasoning={currentResult.orchestrator_reasoning}
-            />
-
-            {/* Verdict Status Banner (with Mandatory Safety Disclaimer) */}
-            <StatusBanner
-              status={currentResult.status_category}
-              disclaimer={currentResult.disclaimer}
-              batchNo={currentResult.official_record?.batch_no || currentQuery}
-              summary={currentResult.summary}
-            />
-
-            {/* Side-by-Side Signal Separation: CDSCO Official vs Community Reports */}
-            <EvidenceCards
-              officialRecord={currentResult.official_record}
-              communityFlag={currentResult.community_flag}
-              communityReportCount={currentResult.community_report_count}
-              communityReports={currentResult.community_reports}
-              onOpenReportModal={() => setIsReportOpen(true)}
-            />
-
-            {/* Manufacturer Dossier if available */}
-            {currentResult.manufacturer_record && (
-              <ManufacturerCard
-                profile={currentResult.manufacturer_record}
-                recentBatches={currentResult.recent_manufacturer_batches}
-              />
-            )}
-
-            {/* Deep / Reactive Autonomous Reasoning Trace & Bedrock Citations */}
-            <DeepReasoningView
-              reasoningTrace={currentResult.reasoning_trace}
-              citations={currentResult.citations}
-              extractedFields={currentResult.extracted_fields}
-            />
-
-            {/* Interactive Helpful/Not Helpful Feedback (Powers RAG Promotion) */}
-            <FeedbackWidget sessionId={currentResult.session_id} />
-
-          </div>
-        )}
-
-        {/* Informative Platform Footnotes */}
-        {!currentResult && !isLoading && (
-          <div className="pt-8 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs text-slate-500">
-            <div className="p-4 rounded-xl bg-white border border-slate-200/70 shadow-sm">
-              <span className="font-bold text-slate-800 block mb-1">⚡ Skill Agent (Tier 1)</span>
-              Direct DynamoDB index query for clean batch numbers in under 500 milliseconds.
-            </div>
-            <div className="p-4 rounded-xl bg-white border border-slate-200/70 shadow-sm">
-              <span className="font-bold text-slate-800 block mb-1">📷 Reactive Agent (Tier 2)</span>
-              Computer vision OCR pipeline extracting typography from medicine strips and packaging.
-            </div>
-            <div className="p-4 rounded-xl bg-white border border-slate-200/70 shadow-sm">
-              <span className="font-bold text-slate-800 block mb-1">🔬 Deep Agent (Tier 3)</span>
-              Autonomous Bedrock Knowledge Base retrieval across regulatory precedents and clinical alerts.
-            </div>
-          </div>
-        )}
-
-      </main>
-
-      {/* Footer */}
-      <footer className="bg-white border-t border-slate-200 py-6 text-center text-xs text-slate-400">
-        <div className="max-w-5xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <span>MedVerify Platform • Official data sourced from CDSCO National Quality Alerts</span>
-          <span className="italic font-medium text-slate-500">
-            "Absence of a flag is not proof of safety."
-          </span>
-        </div>
-      </footer>
-
-      {/* Community Report Submission Modal */}
-      <ReportModal
-        isOpen={isReportOpen}
-        onClose={() => setIsReportOpen(false)}
-        defaultBatchNo={currentResult?.official_record?.batch_no || currentQuery}
-      />
-
-      {/* Verification History Drawer */}
-      <HistoryDrawer
-        isOpen={isHistoryOpen}
-        onClose={() => setIsHistoryOpen(false)}
-        history={history}
-        onSelect={(res) => setCurrentResult(res)}
-        onClear={handleClearHistory}
+      <AppLayout
+        navigation={
+          <Navigation
+            activeHref={activeNav}
+            onFollow={(href) => {
+              setSelectedCase(null);
+              setActiveNav(href);
+            }}
+          />
+        }
+        content={renderContent()}
+        tools={<ToolsDrawer />}
+        toolsOpen={isToolsOpen}
+        onToolsChange={({ detail }) => setIsToolsOpen(detail.open)}
+        headerSelector="#top-nav"
+        contentType="default"
       />
     </div>
   );
