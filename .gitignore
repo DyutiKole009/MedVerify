@@ -49,3 +49,7 @@ cdk.out/
 # OS
 .DS_Store
 Thumbs.db
+
+# Production
+backend/lambda_package.zip
+frontend/.env.production
