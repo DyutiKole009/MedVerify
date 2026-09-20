@@ -9,6 +9,7 @@ class CheckRequest(BaseModel):
     batch_no: Optional[str] = Field(None, description="Medicine batch number from packaging")
     drug_name: Optional[str] = Field(None, description="Brand or generic drug name")
     manufacturer: Optional[str] = Field(None, description="Manufacturer name")
+    text: Optional[str] = Field(None, description="Free-text narrative query, user question, or symptom context")
 
 
 class SourceChunk(BaseModel):
@@ -23,11 +24,16 @@ class SourceChunk(BaseModel):
 
 class CheckResponse(BaseModel):
     session_id: str
-    status_category: str = Field(description="MATCH_FOUND | SPURIOUS | COMMUNITY_FLAGGED | NO_MATCH")
+    status_category: str = Field(description="MATCH_FOUND | SPURIOUS | COMMUNITY_FLAGGED | NO_MATCH | INFO_NEEDED | CLEAR")
     batch_record: Optional[Dict[str, Any]] = None
     community_flag: bool = False
     orchestrator_decision: Dict[str, Any]
     limitation_statement: str = "Absence of a flag is not proof of safety."
+    summary: Optional[str] = None
+    explanation: Optional[str] = None
+    reasoning_trace: Optional[List[str]] = None
+    todos: Optional[List[Dict[str, Any]]] = None
+    extracted_fields: Optional[Dict[str, Any]] = None
     sources: Optional[List["SourceChunk"]] = Field(default=None, description="Attributed data sources used to answer this query")
 
 
@@ -37,10 +43,14 @@ class InvestigateRequest(BaseModel):
 
 
 class DeepInvestigateRequest(BaseModel):
-    description: str = Field(description="Free-text description of suspicion or symptoms")
+    description: Optional[str] = Field(None, description="Free-text description of suspicion or symptoms")
+    free_text_query: Optional[str] = Field(None, description="Alias for description")
     drug_name: Optional[str] = None
     batch_no: Optional[str] = None
     image_s3_key: Optional[str] = None
+
+    def get_query_text(self) -> str:
+        return (self.description or self.free_text_query or "").strip()
 
 
 class ProcessingResponse(BaseModel):
@@ -51,7 +61,9 @@ class ProcessingResponse(BaseModel):
     batch_record: Optional[Dict[str, Any]] = None
     status_category: Optional[str] = None
     summary: Optional[str] = None
+    explanation: Optional[str] = None
     reasoning_trace: Optional[List[str]] = None
+    todos: Optional[List[Dict[str, Any]]] = None
     sources: Optional[List["SourceChunk"]] = Field(default=None, description="Attributed data sources used to answer this query")
 
 

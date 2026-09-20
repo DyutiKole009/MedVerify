@@ -104,8 +104,10 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   };
 
   useEffect(() => {
-    scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isLoading]);
+    if (messages.length > 0) {
+      scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages.length, isLoading]);
 
   // Handle new prompt or attachment
   const handleSendMessage = async (text: string, file?: File) => {
@@ -223,10 +225,14 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
       const targetDrug =
         response.official_record?.drug_name ||
         overrideFields?.drug_name ||
-        textQuery ||
-        'Verification Query';
+        (response.status_category === 'INFO_NEEDED' || textQuery.split(' ').length > 3
+          ? 'Clinical Inquiry'
+          : textQuery || 'Verification Query');
 
-      const sessionCode = `${targetDrug.toUpperCase().replace(/\s+/g, '-').slice(0, 16)}-${targetBatch}`;
+      const sessionCode =
+        response.status_category === 'INFO_NEEDED'
+          ? `CLINICAL-TRIAGE-${response.session_id.slice(0, 8).toUpperCase()}`
+          : `${targetDrug.toUpperCase().replace(/\s+/g, '-').slice(0, 16)}-${targetBatch}`;
       setActiveSessionId(response.session_id);
       setActiveSessionLabel(sessionCode);
       setActiveSessionStatus(response.status_category);
@@ -384,6 +390,13 @@ MedVerify Official Safety Record
         </span>
       );
     }
+    if (s === 'INFO_NEEDED') {
+      return (
+        <span className="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-sky-50 text-sky-800 border border-sky-200">
+          Clinical Guidance Needed
+        </span>
+      );
+    }
     if (s === 'SPURIOUS') {
       return (
         <span className="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-rose-50 text-rose-700 border border-rose-200">
@@ -395,6 +408,20 @@ MedVerify Official Safety Record
       return (
         <span className="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-amber-50 text-amber-800 border border-amber-200">
           NSQ Quality Defect
+        </span>
+      );
+    }
+    if (s === 'COMMUNITY_FLAGGED') {
+      return (
+        <span className="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-purple-50 text-purple-800 border border-purple-200">
+          Community Safety Signal
+        </span>
+      );
+    }
+    if (s === 'NO_MATCH') {
+      return (
+        <span className="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-slate-100 text-slate-700 border border-slate-200">
+          No Adverse Notice
         </span>
       );
     }
@@ -439,8 +466,12 @@ MedVerify Official Safety Record
           </div>
         </div>
 
-        {/* Chat Stream: When empty, render clean ChatGPT welcome screen */}
-        <div className="flex-1 overflow-y-auto px-4 md:px-8 py-8 flex flex-col justify-center">
+        {/* Chat Stream: Dynamic layout (centered welcome when empty, top-aligned natural scroll when active) */}
+        <div
+          className={`flex-1 overflow-y-auto px-4 md:px-8 py-6 flex flex-col ${
+            messages.length === 0 ? 'items-center justify-center' : 'justify-start'
+          }`}
+        >
           {messages.length === 0 ? (
             <div className="flex-1 flex flex-col items-center justify-center max-w-xl mx-auto px-4 text-center select-none py-12">
               <div className="w-12 h-12 rounded-xl bg-sky-600 text-white flex items-center justify-center mb-4 shadow-sm">
@@ -508,7 +539,7 @@ MedVerify Official Safety Record
               </div>
             </div>
           ) : (
-            <div className="max-w-3xl mx-auto w-full flex flex-col gap-6">
+            <div className="max-w-3xl mx-auto w-full flex flex-col gap-6 pb-12">
               {messages.map((msg) => (
                 <ChatMessage
                   key={msg.id}
@@ -518,7 +549,7 @@ MedVerify Official Safety Record
                   onDownloadReport={handleExportReport}
                 />
               ))}
-              <div ref={scrollRef} />
+              <div ref={scrollRef} className="h-2 shrink-0" />
             </div>
           )}
         </div>
