@@ -10,6 +10,7 @@ export interface OfficialRecord {
   nsq_reason?: string | null;
   source_month?: string;
   source_document_s3_key?: string;
+  source_document_pdf_url?: string;
   mfg_date?: string;
   expiry_date?: string;
 }
@@ -33,6 +34,16 @@ export interface ManufacturerProfile {
   last_flagged_date?: string;
 }
 
+/** A single attributed data source — either a DynamoDB batch record (DB) or a Bedrock KB advisory chunk (KB). */
+export interface SourceChunk {
+  type: 'DB' | 'KB';
+  label: string;               // e.g. "CDSCO DynamoDB · Apr 2025 — NSQ Record"
+  reference?: string;          // batch_no (DB) or S3 URI (KB)
+  content_preview?: string;    // summary line or first 150 chars of KB text
+  doc_url?: string;            // clickable CDSCO PDF URL
+  score?: number;              // relevance score (KB only)
+}
+
 export interface VerificationResponse {
   session_id: string;
   status_category: StatusCategory;
@@ -48,6 +59,7 @@ export interface VerificationResponse {
   orchestrator_reasoning?: string;
   reasoning_trace?: string[];
   citations?: Array<{ title?: string; source_url: string; text?: string }>;
+  sources?: SourceChunk[];     // Attributed data sources (DB records + KB advisory chunks)
   extracted_fields?: {
     drug_name?: string;
     batch_no?: string;

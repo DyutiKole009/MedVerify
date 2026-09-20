@@ -25,6 +25,7 @@ export interface CaseRecord {
   timestamp: string;
   imageUrl?: string;
   result: VerificationResponse;
+  messages?: any[];
 }
 
 interface DashboardViewProps {

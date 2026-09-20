@@ -1,4 +1,4 @@
-﻿import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
 import type { AuthUser } from '../services/auth';
 import {
   getStoredUser,
@@ -64,9 +64,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const login = async (email: string, password: string) => {
-    await loginApi(email, password);
+    const tokens = await loginApi(email, password);
     const profile = await fetchCurrentUser();
-    setUser(profile || { user_id: email, email, role: 'consumer' });
+    const stored = getStoredUser();
+    setUser(
+      profile ||
+        stored || {
+          user_id: tokens.user_id || email,
+          email: tokens.email || email,
+          role: (tokens.role as any) || 'consumer',
+          name: tokens.name,
+        }
+    );
     closeModal();
   };
 

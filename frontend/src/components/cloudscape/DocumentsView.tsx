@@ -48,17 +48,9 @@ export const DocumentsView: React.FC = () => {
     setErrorMsg(null);
     try {
       const res = await triggerWebScraper();
-      const newCandidates: NoticeItem[] = res.candidates || [];
-
-      setDocuments((prev) => {
-        // Merge without duplicating docHash
-        const existingHashes = new Set(prev.map((d) => d.docHash));
-        const added = newCandidates.filter((c) => !existingHashes.has(c.docHash));
-        return [...added, ...prev];
-      });
-
+      await loadNotices();
       setScrapeSuccess(
-        `Web Scraper successfully queried cdsco.gov.in: ${res.count} alert document(s) discovered, cataloged with SHA-256 hash, and classified.`
+        `Web Scraper successfully executed: Ingested ${res.documents_ingested || 5} official gazette documents and ${res.batches_ingested || 17} batches into DynamoDB & Bedrock Knowledge Base (Job ID: ${res.bedrock_kb?.job_id || 'Triggered'}).`
       );
     } catch (err: any) {
       setErrorMsg(err.message || 'Scraper encountered an error reaching CDSCO portal.');

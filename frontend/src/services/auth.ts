@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Authentication service for Amazon Cognito API endpoints (§8).
  * Manages JWT tokens, local session persistence, and user profile state.
  */
@@ -24,6 +24,8 @@ export interface AuthResponse {
   token_type?: string;
   role?: string;
   user_id?: string;
+  email?: string;
+  name?: string;
 }
 
 export function getAuthToken(): string | null {
@@ -81,10 +83,20 @@ export async function loginApi(email: string, password: string): Promise<AuthRes
   }
 
   const data: AuthResponse = await res.json();
+  let resolvedName = data.name;
+  if (!resolvedName && email) {
+    const rawUsername = email.split('@')[0];
+    resolvedName = rawUsername
+      .split(/[._-]/)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ');
+  }
+
   const user: AuthUser = {
     user_id: data.user_id || email,
-    email,
+    email: data.email || email,
     role: data.role || 'consumer',
+    name: resolvedName,
   };
   saveAuthSession(data, user);
   return data;
@@ -145,14 +157,42 @@ export async function fetchCurrentUser(): Promise<AuthUser | null> {
   if (!token) return null;
 
   try {
-    const res = await fetch(`${API_BASE}/auth/me`, {
+    let res = await fetch(`${API_BASE}/auth/me`, {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
     });
 
+    if (res.status === 401) {
+      // Try refreshing access token
+      const rToken = getRefreshToken();
+      if (rToken) {
+        try {
+          const refreshRes = await fetch(`${API_BASE}/auth/refresh`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refresh_token: rToken }),
+          });
+          if (refreshRes.ok) {
+            const tokens: AuthResponse = await refreshRes.json();
+            saveAuthSession(tokens);
+            res = await fetch(`${API_BASE}/auth/me`, {
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${tokens.access_token}`,
+              },
+            });
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }
+
     if (!res.ok) {
+      const stored = getStoredUser();
+      if (stored) return stored;
       if (res.status === 401) {
         clearAuthSession();
       }
@@ -160,6 +200,16 @@ export async function fetchCurrentUser(): Promise<AuthUser | null> {
     }
 
     const user: AuthUser = await res.json();
+    const stored = getStoredUser();
+    if (!user.name && stored?.name) {
+      user.name = stored.name;
+    } else if (!user.name && user.email) {
+      user.name = user.email
+        .split('@')[0]
+        .split(/[._-]/)
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ');
+    }
     localStorage.setItem(USER_KEY, JSON.stringify(user));
     return user;
   } catch {

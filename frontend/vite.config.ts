@@ -11,6 +11,7 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 3000,
       proxy: {
+        '/auth': { target: proxyTarget, changeOrigin: true },
         '/check': { target: proxyTarget, changeOrigin: true },
         '/investigate': { target: proxyTarget, changeOrigin: true },
         '/sessions': { target: proxyTarget, changeOrigin: true },

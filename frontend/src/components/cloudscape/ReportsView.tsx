@@ -19,16 +19,18 @@ interface ReportsViewProps {
   isModalOpen?: boolean;
   onCloseModal?: () => void;
   defaultBatchNo?: string;
+  defaultDrugName?: string;
 }
 
 export const ReportsView: React.FC<ReportsViewProps> = ({
   isModalOpen = false,
   onCloseModal,
   defaultBatchNo = '',
+  defaultDrugName = '',
 }) => {
   const [modalVisible, setModalVisible] = useState(isModalOpen);
   const [batchNo, setBatchNo] = useState(defaultBatchNo);
-  const [drugName, setDrugName] = useState('');
+  const [drugName, setDrugName] = useState(defaultDrugName);
   const [issueType, setIssueType] = useState<{ label: string; value: string }>({
     label: 'Suspected Counterfeit / Fake',
     value: 'SUSPECTED_COUNTERFEIT',
@@ -40,7 +42,12 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   // Sync external modal trigger
   React.useEffect(() => {
     setModalVisible(isModalOpen);
-  }, [isModalOpen]);
+    if (isModalOpen) {
+      if (defaultBatchNo) setBatchNo(defaultBatchNo);
+      if (defaultDrugName) setDrugName(defaultDrugName);
+      setSubmitSuccess(false);
+    }
+  }, [isModalOpen, defaultBatchNo, defaultDrugName]);
 
   const reports: Array<{
     id: string;
