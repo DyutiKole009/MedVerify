@@ -1,0 +1,84 @@
+{
+  "Comment": "MedVerify Reactive Agent verification state machine for packaging photo verification",
+  "StartAt": "ExtractFromImage",
+  "States": {
+    "ExtractFromImage": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:REGION:ACCOUNT:function:extract-from-image",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "ExtractionFailed"
+        }
+      ],
+      "TimeoutSeconds": 20,
+      "Next": "NormalizeAndResolve"
+    },
+    "NormalizeAndResolve": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:REGION:ACCOUNT:function:normalize-resolve",
+      "Next": "ParallelChecks"
+    },
+    "ParallelChecks": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "CheckBatch",
+          "States": {
+            "CheckBatch": {
+              "Type": "Task",
+              "Resource": "arn:aws:lambda:REGION:ACCOUNT:function:check-batch",
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "CheckManufacturerHistory",
+          "States": {
+            "CheckManufacturerHistory": {
+              "Type": "Task",
+              "Resource": "arn:aws:lambda:REGION:ACCOUNT:function:check-manufacturer",
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "CheckCommunityReports",
+          "States": {
+            "CheckCommunityReports": {
+              "Type": "Task",
+              "Resource": "arn:aws:lambda:REGION:ACCOUNT:function:check-reports",
+              "End": true
+            }
+          }
+        }
+      ],
+      "Next": "SynthesizeEvidence"
+    },
+    "SynthesizeEvidence": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:REGION:ACCOUNT:function:synthesize-evidence",
+      "Next": "StoreSession"
+    },
+    "StoreSession": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:REGION:ACCOUNT:function:store-session",
+      "Next": "ReturnResult"
+    },
+    "ReturnResult": {
+      "Type": "Succeed"
+    },
+    "ExtractionFailed": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:REGION:ACCOUNT:function:store-session-partial",
+      "End": true
+    }
+  }
+}

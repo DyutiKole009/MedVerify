@@ -1,0 +1,225 @@
+import React, { useState } from 'react';
+import {
+  Table,
+  Header,
+  SpaceBetween,
+  Button,
+  Badge,
+  Box,
+  Modal,
+  FormField,
+  Input,
+  Select,
+  Textarea,
+  StatusIndicator,
+} from '@cloudscape-design/components';
+import { submitCommunityReport } from '../../services/api';
+
+interface ReportsViewProps {
+  isModalOpen?: boolean;
+  onCloseModal?: () => void;
+  defaultBatchNo?: string;
+  defaultDrugName?: string;
+}
+
+export const ReportsView: React.FC<ReportsViewProps> = ({
+  isModalOpen = false,
+  onCloseModal,
+  defaultBatchNo = '',
+  defaultDrugName = '',
+}) => {
+  const [modalVisible, setModalVisible] = useState(isModalOpen);
+  const [batchNo, setBatchNo] = useState(defaultBatchNo);
+  const [drugName, setDrugName] = useState(defaultDrugName);
+  const [issueType, setIssueType] = useState<{ label: string; value: string }>({
+    label: 'Suspected Counterfeit / Fake',
+    value: 'SUSPECTED_COUNTERFEIT',
+  });
+  const [description, setDescription] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitSuccess, setSubmitSuccess] = useState(false);
+
+  // Sync external modal trigger
+  React.useEffect(() => {
+    setModalVisible(isModalOpen);
+    if (isModalOpen) {
+      if (defaultBatchNo) setBatchNo(defaultBatchNo);
+      if (defaultDrugName) setDrugName(defaultDrugName);
+      setSubmitSuccess(false);
+    }
+  }, [isModalOpen, defaultBatchNo, defaultDrugName]);
+
+  const reports: Array<{
+    id: string;
+    batchNo: string;
+    drugName: string;
+    issueType: string;
+    description: string;
+    date: string;
+    status: string;
+  }> = [];
+
+  const handleClose = () => {
+    setModalVisible(false);
+    onCloseModal?.();
+  };
+
+  const handleSubmit = async () => {
+    if (!description.trim()) return;
+    setIsSubmitting(true);
+    await submitCommunityReport({
+      batch_no: batchNo.trim() || undefined,
+      drug_name: drugName.trim() || undefined,
+      issue_type: issueType.value,
+      description: description.trim(),
+    });
+    setIsSubmitting(false);
+    setSubmitSuccess(true);
+    setTimeout(() => {
+      setSubmitSuccess(false);
+      handleClose();
+    }, 1500);
+  };
+
+  return (
+    <SpaceBetween size="l">
+      <Header
+        variant="h1"
+        description="Crowd-sourced real-world issues, adverse reactions, and packaging defect signals submitted by consumers and registered pharmacists."
+        actions={
+          <Button variant="primary" onClick={() => setModalVisible(true)}>
+            File Incident Report
+          </Button>
+        }
+      >
+        Community Safety Intelligence & Incident Reports
+      </Header>
+
+      <Table
+        columnDefinitions={[
+          {
+            id: 'id',
+            header: 'Report ID',
+            cell: (item) => <Box variant="code">{item.id}</Box>,
+          },
+          {
+            id: 'batchNo',
+            header: 'Batch ID',
+            cell: (item) => <Box variant="strong">{item.batchNo}</Box>,
+          },
+          {
+            id: 'drugName',
+            header: 'Drug Name',
+            cell: (item) => item.drugName,
+          },
+          {
+            id: 'issueType',
+            header: 'Report Category',
+            cell: (item) => (
+              <Badge color={item.issueType === 'SUSPECTED_COUNTERFEIT' ? 'red' : 'blue'}>
+                {item.issueType.replace('_', ' ')}
+              </Badge>
+            ),
+          },
+          {
+            id: 'description',
+            header: 'Description & Symptoms',
+            cell: (item) => item.description,
+          },
+          {
+            id: 'status',
+            header: 'Status',
+            cell: (item) => (
+              <StatusIndicator type={item.status === 'VERIFIED' ? 'success' : 'warning'}>
+                {item.status}
+              </StatusIndicator>
+            ),
+          },
+          {
+            id: 'date',
+            header: 'Date Logged',
+            cell: (item) => item.date,
+          },
+        ]}
+        items={reports}
+      />
+
+      {/* Cloudscape Report Submission Modal */}
+      <Modal
+        visible={modalVisible}
+        onDismiss={handleClose}
+        header="Submit Medicine Incident Report"
+        footer={
+          <Box float="right">
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button variant="link" onClick={handleClose}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                loading={isSubmitting}
+                onClick={handleSubmit}
+                disabled={!description.trim()}
+              >
+                Submit Report
+              </Button>
+            </SpaceBetween>
+          </Box>
+        }
+      >
+        {submitSuccess ? (
+          <Box textAlign="center" padding={{ vertical: 'l' }}>
+            <StatusIndicator type="success">
+              Report successfully recorded in community safety registry.
+            </StatusIndicator>
+          </Box>
+        ) : (
+          <SpaceBetween size="m">
+            <FormField label="Batch Number" description="Batch printed on strip or outer carton">
+              <Input
+                value={batchNo}
+                onChange={({ detail }) => setBatchNo(detail.value)}
+                placeholder="e.g. B-9021"
+              />
+            </FormField>
+
+            <FormField label="Medicine Name" description="Brand or generic composition">
+              <Input
+                value={drugName}
+                onChange={({ detail }) => setDrugName(detail.value)}
+                placeholder="e.g. Paracetamol 500mg"
+              />
+            </FormField>
+
+            <FormField label="Issue Category">
+              <Select
+                selectedOption={issueType}
+                onChange={({ detail }) =>
+                  setIssueType(detail.selectedOption as { label: string; value: string })
+                }
+                options={[
+                  { label: 'Suspected Counterfeit / Fake', value: 'SUSPECTED_COUNTERFEIT' },
+                  { label: 'Packaging / Label Print Flaw', value: 'PACKAGING_DEFECT' },
+                  { label: 'Unexpected Adverse Reaction', value: 'ADVERSE_REACTION' },
+                  { label: 'Lack of Therapeutic Effect', value: 'INEFFECTIVE' },
+                ]}
+              />
+            </FormField>
+
+            <FormField
+              label="Description & Clinical Observations"
+              description="Describe physical anomalies, symptoms experienced, or packaging defects"
+            >
+              <Textarea
+                value={description}
+                onChange={({ detail }) => setDescription(detail.value)}
+                placeholder="Provide details on tablets, smell, packaging defects, or symptoms..."
+                rows={3}
+              />
+            </FormField>
+          </SpaceBetween>
+        )}
+      </Modal>
+    </SpaceBetween>
+  );
+};
