@@ -1,4 +1,4 @@
-﻿"""
+"""
 Amazon Cognito Identity Provider integration service (§8).
 Handles user registration, authentication, password management, and JWKS token validation.
 """
@@ -52,13 +52,22 @@ def verify_cognito_jwt(token: str) -> Dict[str, Any]:
                 "issuer": expected_issuer,
                 "options": {"verify_exp": True},
             }
-            if settings.COGNITO_APP_CLIENT_ID:
+            # Cognito access tokens use 'client_id' rather than 'aud'
+            try:
+                unverified = jwt.decode(token, options={"verify_signature": False})
+            except Exception:
+                unverified = {}
+
+            if unverified.get("token_use") == "access":
+                decode_kwargs["options"]["verify_aud"] = False
+            elif settings.COGNITO_APP_CLIENT_ID:
                 decode_kwargs["audience"] = settings.COGNITO_APP_CLIENT_ID
 
             claims = jwt.decode(token, signing_key.key, **decode_kwargs)
             return {
                 "user_id": claims.get("sub", claims.get("username", "")),
                 "email": claims.get("email"),
+                "name": claims.get("name"),
                 "role": claims.get("custom:role", "consumer"),
                 "groups": claims.get("cognito:groups", []),
                 "claims": claims,
@@ -73,6 +82,7 @@ def verify_cognito_jwt(token: str) -> Dict[str, Any]:
         return {
             "user_id": claims.get("sub", claims.get("username", "authenticated_user")),
             "email": claims.get("email"),
+            "name": claims.get("name"),
             "role": claims.get("custom:role", "consumer"),
             "groups": claims.get("cognito:groups", []),
             "claims": claims,
@@ -80,6 +90,54 @@ def verify_cognito_jwt(token: str) -> Dict[str, Any]:
         }
     except Exception as err:
         raise ValueError(f"Invalid JWT token: {err}") from err
+
+
+def get_user_profile_by_sub(user_sub_or_username: str) -> Dict[str, Any]:
+    """Retrieves user profile directly from Cognito User Pool using admin credentials."""
+    if not settings.COGNITO_USER_POOL_ID or not user_sub_or_username:
+        return {}
+    client = get_cognito_client()
+    try:
+        res = client.admin_get_user(
+            UserPoolId=settings.COGNITO_USER_POOL_ID,
+            Username=user_sub_or_username,
+        )
+        attrs = {item["Name"]: item["Value"] for item in res.get("UserAttributes", [])}
+        return {
+            "username": res.get("Username"),
+            "email": attrs.get("email"),
+            "name": attrs.get("name"),
+            "role": attrs.get("custom:role", "consumer"),
+            "attributes": attrs,
+        }
+    except Exception as exc:
+        logger.debug(f"admin_get_user failed for {user_sub_or_username}: {exc}")
+        return {}
+
+
+def get_user_attributes_from_token(access_token: str) -> Dict[str, Any]:
+    """Retrieves user profile attributes directly from Cognito User Pool."""
+    client = get_cognito_client()
+    try:
+        resp = client.get_user(AccessToken=access_token)
+        attrs = {item["Name"]: item["Value"] for item in resp.get("UserAttributes", [])}
+        return {
+            "username": resp.get("Username"),
+            "email": attrs.get("email"),
+            "name": attrs.get("name"),
+            "role": attrs.get("custom:role", "consumer"),
+            "attributes": attrs,
+        }
+    except Exception as exc:
+        logger.debug(f"Cognito get_user failed: {exc}. Attempting admin lookup.")
+        try:
+            unverified = jwt.decode(access_token, options={"verify_signature": False})
+            sub = unverified.get("sub") or unverified.get("username")
+            if sub:
+                return get_user_profile_by_sub(sub)
+        except Exception:
+            pass
+        return {}
 
 
 def sign_up(email: str, password: str, role: str = "consumer", name: Optional[str] = None) -> Dict[str, Any]:

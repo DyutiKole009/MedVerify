@@ -115,6 +115,8 @@ class TokenResponse(BaseModel):
     token_type: str = "Bearer"
     role: Optional[str] = "consumer"
     user_id: Optional[str] = None
+    email: Optional[str] = None
+    name: Optional[str] = None
 
 
 class UserProfileResponse(BaseModel):

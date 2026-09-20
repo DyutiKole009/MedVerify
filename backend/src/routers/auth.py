@@ -1,4 +1,4 @@
-﻿"""
+"""
 Amazon Cognito Authentication & Identity API router (§8).
 Provides endpoints for signup, verification, login, token refresh, and profile inspection.
 """
@@ -96,14 +96,39 @@ def login_user(request: LoginRequest) -> TokenResponse:
         token_for_claims = tokens.get("id_token") or tokens.get("access_token")
         user_info = cognito.verify_cognito_jwt(token_for_claims) if token_for_claims else {}
 
+        name = user_info.get("name")
+        email = user_info.get("email") or request.email
+        role = user_info.get("role", "consumer")
+        user_id = user_info.get("user_id")
+
+        if not name and tokens.get("access_token"):
+            extra = cognito.get_user_attributes_from_token(tokens["access_token"])
+            name = extra.get("name")
+            if extra.get("email"):
+                email = extra.get("email")
+            if extra.get("role"):
+                role = extra.get("role")
+
+        if not name and user_id:
+            extra = cognito.get_user_profile_by_sub(user_id)
+            name = extra.get("name") or name
+            if extra.get("email"):
+                email = extra.get("email")
+
+        if not name and email:
+            extra = cognito.get_user_profile_by_sub(email)
+            name = extra.get("name") or name
+
         return TokenResponse(
             access_token=tokens["access_token"],
             id_token=tokens.get("id_token"),
             refresh_token=tokens.get("refresh_token"),
             expires_in=tokens.get("expires_in", 3600),
             token_type=tokens.get("token_type", "Bearer"),
-            role=user_info.get("role", "consumer"),
-            user_id=user_info.get("user_id"),
+            role=role,
+            user_id=user_id,
+            email=email,
+            name=name,
         )
     except ClientError as exc:
         code = exc.response.get("Error", {}).get("Code", "AuthError")

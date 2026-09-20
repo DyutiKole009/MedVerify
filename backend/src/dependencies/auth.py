@@ -1,4 +1,4 @@
-﻿"""
+"""
 Authentication and authorization dependencies for FastAPI endpoints (§8).
 Supports Amazon Cognito JWT authentication and client-side anonymous ID tracking.
 """
@@ -21,9 +21,24 @@ def get_current_user_optional(
         token = authorization.split(" ")[1]
         try:
             user_data = verify_cognito_jwt(token)
+            # If name or email missing, fetch from Cognito via get_user_attributes_from_token
+            if not user_data.get("name") or not user_data.get("email"):
+                from src.tools.cognito import get_user_attributes_from_token, get_user_profile_by_sub
+                extra = get_user_attributes_from_token(token)
+                if not extra and user_data.get("user_id"):
+                    extra = get_user_profile_by_sub(user_data["user_id"])
+                if extra:
+                    if not user_data.get("name") and extra.get("name"):
+                        user_data["name"] = extra.get("name")
+                    if not user_data.get("email") and extra.get("email"):
+                        user_data["email"] = extra.get("email")
+                    if extra.get("role"):
+                        user_data["role"] = extra.get("role")
+
             return {
                 "user_id": user_data["user_id"],
                 "email": user_data.get("email"),
+                "name": user_data.get("name"),
                 "role": user_data.get("role", "consumer"),
                 "groups": user_data.get("groups", []),
                 "is_authenticated": True,
