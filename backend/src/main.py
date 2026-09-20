@@ -1,6 +1,11 @@
-﻿"""
-MedVerify FastAPI Server Application and AWS Lambda Handler (§12).
-"""
+import sys
+from pathlib import Path
+
+# Ensure backend directory is in sys.path when starting from workspace root
+_backend_dir = str(Path(__file__).resolve().parent.parent)
+if _backend_dir not in sys.path:
+    sys.path.insert(0, _backend_dir)
+
 from typing import Dict, Any, List
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware

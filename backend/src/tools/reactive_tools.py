@@ -1,7 +1,7 @@
-﻿"""Fixed-step tools used by the Reactive Agent."""
+"""Fixed-step tools used by the Reactive Agent."""
 import json
 import re
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 try:
     from strands import tool
