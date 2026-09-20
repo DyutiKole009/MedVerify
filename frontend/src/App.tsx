@@ -1,4 +1,4 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import AppLayout from '@cloudscape-design/components/app-layout';
 import Alert from '@cloudscape-design/components/alert';
 import { TopNav } from './components/cloudscape/TopNav';
@@ -10,16 +10,38 @@ import { DocumentsView } from './components/cloudscape/DocumentsView';
 import { ReportsView } from './components/cloudscape/ReportsView';
 import { AnalyticsView } from './components/cloudscape/AnalyticsView';
 import { ToolsDrawer } from './components/cloudscape/ToolsDrawer';
+import { AuthModal } from './components/AuthModal';
+import { AuthPage } from './components/AuthPage';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { submitVerification } from './services/api';
 import type { VerificationResponse } from './types/api';
 
-export function App() {
+function AppContent() {
+  const { isAuthenticated, isLoading: isAuthLoading } = useAuth();
+  const [guestAccess, setGuestAccess] = useState(false);
+
   const [activeNav, setActiveNav] = useState('#dashboard');
   const [selectedCase, setSelectedCase] = useState<CaseRecord | null>(null);
   const [cases, setCases] = useState<CaseRecord[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isToolsOpen, setIsToolsOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // If user is not logged in and hasn't opted for guest access, show AuthPage first
+  if (isAuthLoading) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white">
+        <div className="flex flex-col items-center space-y-3">
+          <div className="w-10 h-10 border-4 border-sky-500 border-t-transparent rounded-full animate-spin" />
+          <p className="text-sm font-medium text-slate-300">Loading MedVerify Workspace...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated && !guestAccess) {
+    return <AuthPage onContinueAsGuest={() => setGuestAccess(true)} />;
+  }
 
   const handleVerify = async (queryText: string, file?: File) => {
     setIsLoading(true);
@@ -107,7 +129,11 @@ export function App() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <TopNav onNavigate={(href) => setActiveNav(href)} />
+      <TopNav
+        onNavigate={(href) => setActiveNav(href)}
+        onSignOut={() => setGuestAccess(false)}
+      />
+      <AuthModal />
 
       <AppLayout
         navigation={
@@ -139,6 +165,14 @@ export function App() {
         contentType="default"
       />
     </div>
+  );
+}
+
+export function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 }
 

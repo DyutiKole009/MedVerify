@@ -1,14 +1,15 @@
-"""
+﻿"""
 Orchestrator classification and tier routing logic (§9.1).
 Determines whether a query is resolved via SKILL, REACTIVE, or DEEP agent tiers.
+Uses Strands Agent with Groq (llama-3.3-70b-versatile).
 """
 import json
+import os
 import re
 from typing import Any, Dict, Optional
 from pydantic import BaseModel, Field
 
 from src.config import settings
-from src.tools.aws import get_bedrock_runtime_client
 from src.utils.logger import logger
 
 
@@ -74,8 +75,34 @@ def _clean_json(text: str) -> str:
     return t
 
 
+def get_orchestrator_agent():
+    """Returns a Strands Agent configured with Groq for classification."""
+    try:
+        import openai
+        from strands import Agent
+        from strands.models.openai import OpenAIModel
+
+        api_key = getattr(settings, "GROQ_API_KEY", None) or os.environ.get("GROQ_API_KEY", "gsk_mock")
+        client = openai.Client(
+            base_url="https://api.groq.com/openai/v1",
+            api_key=api_key,
+        )
+        model = OpenAIModel(
+            client=client,
+            model_id=getattr(settings, "GROQ_MODEL_ID", None) or "llama-3.3-70b-versatile",
+        )
+        return Agent(
+            model=model,
+            system_prompt=ORCHESTRATOR_SYSTEM_PROMPT,
+            structured_output_model=OrchestratorDecision,
+        )
+    except Exception as e:
+        logger.warning(f"Failed to initialize Strands Agent with Groq: {e}")
+        return None
+
+
 def fallback_decision(has_image: bool, raw_input: str, reason: str = "Fallback applied") -> OrchestratorDecision:
-    """Deterministic fallback when Bedrock classification fails or is unavailable (§9.1)."""
+    """Deterministic fallback when classification fails or is unavailable (§9.1)."""
     if has_image:
         return OrchestratorDecision(
             intent="medicine_verification",
@@ -106,12 +133,12 @@ def orchestrate(
     image_s3_key: Optional[str] = None,
 ) -> OrchestratorDecision:
     """
-    Classifies user input using Bedrock and returns the selected agent tier.
+    Classifies user input using Strands Agent + Groq and returns the selected agent tier.
     Falls back gracefully to deterministic heuristics on failure.
     """
     is_image = has_image or bool(image_s3_key)
 
-    # Short-circuit rule 1: If an explicit batch number is given without open narrative, route to SKILL
+    # Short-circuit rule: explicit batch number without narrative -> always SKILL
     if (batch_no or (drug_name and manufacturer)) and not is_image and not text:
         return OrchestratorDecision(
             intent="batch_lookup",
@@ -123,7 +150,6 @@ def orchestrate(
             reasoning="Direct batch identifier provided without narrative context.",
         )
 
-    # Compose prompt for Bedrock
     user_payload = {
         "text": text or "",
         "batch_no": batch_no or "",
@@ -132,21 +158,59 @@ def orchestrate(
         "has_image": is_image,
     }
 
+    logger.info(f"[STRANDS REQUEST] [Orchestrator] Payload={user_payload}")
+
     try:
-        bedrock = get_bedrock_runtime_client()
-        response = bedrock.converse(
-            modelId=settings.BEDROCK_ORCHESTRATOR_MODEL_ID,
-            messages=[{
-                "role": "user",
-                "content": [{"text": json.dumps(user_payload)}]
-            }],
-            system=[{"text": ORCHESTRATOR_SYSTEM_PROMPT}],
-            inferenceConfig={"maxTokens": 500, "temperature": 0.0},
+        agent = get_orchestrator_agent()
+        if agent is not None:
+            result = agent(json.dumps(user_payload))
+            if hasattr(result, "structured_output") and result.structured_output:
+                if isinstance(result.structured_output, OrchestratorDecision):
+                    decision = result.structured_output
+                    logger.info(f"[STRANDS RESPONSE] [Orchestrator] Tier='{decision.selected_tier}'")
+                    return decision
+                if isinstance(result.structured_output, dict):
+                    decision = OrchestratorDecision(**result.structured_output)
+                    logger.info(f"[STRANDS RESPONSE] [Orchestrator] Tier='{decision.selected_tier}'")
+                    return decision
+
+            msg_content = ""
+            if hasattr(result, "message"):
+                msg = result.message
+                if isinstance(msg, dict):
+                    content = msg.get("content", "")
+                    msg_content = content[0].get("text", "") if isinstance(content, list) and content else str(content)
+                else:
+                    msg_content = str(msg)
+            elif isinstance(result, str):
+                msg_content = result
+
+            cleaned = _clean_json(msg_content)
+            data = json.loads(cleaned)
+            decision = OrchestratorDecision(**data)
+            logger.info(f"[STRANDS RESPONSE] [Orchestrator] Tier='{decision.selected_tier}'")
+            return decision
+
+        # Direct Groq fallback if Strands Agent was not initialized
+        from groq import Groq
+        groq_client = Groq(api_key=settings.GROQ_API_KEY)
+        model = settings.GROQ_MODEL_ID or "llama-3.3-70b-versatile"
+        response = groq_client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": ORCHESTRATOR_SYSTEM_PROMPT},
+                {"role": "user", "content": json.dumps(user_payload)},
+            ],
+            temperature=0.0,
+            max_tokens=500,
+            response_format={"type": "json_object"},
         )
-        output_text = response.get("output", {}).get("message", {}).get("content", [{}])[0].get("text", "")
+        output_text = response.choices[0].message.content or "{}"
         cleaned = _clean_json(output_text)
         data = json.loads(cleaned)
-        return OrchestratorDecision(**data)
+        decision = OrchestratorDecision(**data)
+        return decision
+
     except Exception as exc:
-        logger.warning(f"Orchestrator Bedrock call failed: {exc}. Using deterministic fallback.")
+        logger.warning(f"Orchestrator classification failed: {exc}. Using deterministic fallback.")
         return fallback_decision(has_image=is_image, raw_input=str(user_payload), reason=f"Classification error ({exc})")

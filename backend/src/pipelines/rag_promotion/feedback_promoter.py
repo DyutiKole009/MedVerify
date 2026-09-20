@@ -1,12 +1,12 @@
-"""
+﻿"""
 Feedback-Gated RAG Improvement loop (§6.4).
-Promotes validated, high-quality investigation sessions with positive user feedback into the Bedrock Knowledge Base.
+Promotes validated, high-quality investigation sessions with positive user feedback into the S3 case history corpus.
 """
 import json
 from typing import Dict, Any, List
 from boto3.dynamodb.conditions import Attr
 
-from src.tools.aws import get_dynamodb_resource, get_s3_client, get_boto_session
+from src.tools.aws import get_dynamodb_resource, get_s3_client
 from src.config import settings
 from src.utils.logger import logger
 
@@ -16,13 +16,12 @@ def promote_feedback_sessions_to_kb(limit: int = 20) -> int:
     Scans for sessions meeting:
       - feedback.helpful == True
       - promoted_to_kb != True
-    Strips PII and publishes sanitized narrative to the case-history corpus.
+    Strips PII and publishes sanitized narrative to the case-history corpus in S3.
     """
     dynamo = get_dynamodb_resource()
     sessions_table = dynamo.Table(settings.DYNAMODB_SESSIONS_TABLE)
     s3 = get_s3_client()
 
-    # Scan for eligible sessions
     scan_res = sessions_table.scan(
         FilterExpression=Attr("feedback.helpful").eq(True) & (Attr("promoted_to_kb").not_exists() | Attr("promoted_to_kb").eq(False)),
         Limit=limit,
@@ -62,7 +61,6 @@ def promote_feedback_sessions_to_kb(limit: int = 20) -> int:
             }
         }
 
-        # Write text document and metadata sidecar to S3 KB case-history bucket
         s3_doc_key = f"case-history/{session_id}.txt"
         s3_meta_key = f"case-history/{session_id}.txt.metadata.json"
 
@@ -87,19 +85,6 @@ def promote_feedback_sessions_to_kb(limit: int = 20) -> int:
         )
 
         promoted_count += 1
-        logger.info(f"Promoted session {session_id} to Bedrock KB case history.")
-
-    # Trigger Bedrock Knowledge Base sync if items were promoted
-    if promoted_count > 0 and settings.BEDROCK_KB_ID and settings.BEDROCK_KB_DATA_SOURCE_CASES_ID:
-        try:
-            agent_client = get_boto_session().client("bedrock-agent")
-            agent_client.start_ingestion_job(
-                knowledgeBaseId=settings.BEDROCK_KB_ID,
-                dataSourceId=settings.BEDROCK_KB_DATA_SOURCE_CASES_ID,
-                description=f"Automated sync: {promoted_count} feedback-promoted cases",
-            )
-            logger.info("Triggered Bedrock Knowledge Base ingestion job.")
-        except Exception as exc:
-            logger.warning(f"Bedrock KB ingestion job trigger skipped: {exc}")
+        logger.info(f"Promoted session {session_id} to case history corpus in S3.")
 
     return promoted_count

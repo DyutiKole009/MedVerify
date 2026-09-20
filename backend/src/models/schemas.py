@@ -70,3 +70,56 @@ class PresignUploadResponse(BaseModel):
     upload_url: str
     s3_key: str
     expires_in: int = 3600
+
+
+class SignUpRequest(BaseModel):
+    email: str = Field(description="User email address")
+    password: str = Field(min_length=8, description="User password (min 8 chars)")
+    role: Optional[str] = Field("consumer", description="consumer | pharmacist | admin")
+    name: Optional[str] = Field(None, description="Full name of the user")
+
+
+class ConfirmSignUpRequest(BaseModel):
+    email: str = Field(description="User email address")
+    confirmation_code: str = Field(description="6-digit verification code sent by Cognito")
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(description="User email address")
+    password: str = Field(description="User password")
+
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str = Field(description="Cognito refresh token")
+
+
+class ResendCodeRequest(BaseModel):
+    email: str = Field(description="User email address to resend confirmation code to")
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str = Field(description="User email address to request password reset")
+
+
+class ConfirmForgotPasswordRequest(BaseModel):
+    email: str = Field(description="User email address")
+    confirmation_code: str = Field(description="Reset code sent to user email")
+    new_password: str = Field(min_length=8, description="New password")
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    id_token: Optional[str] = None
+    refresh_token: Optional[str] = None
+    expires_in: int = 3600
+    token_type: str = "Bearer"
+    role: Optional[str] = "consumer"
+    user_id: Optional[str] = None
+
+
+class UserProfileResponse(BaseModel):
+    user_id: str
+    email: Optional[str] = None
+    role: str = "consumer"
+    name: Optional[str] = None
+    email_verified: bool = False

@@ -1,4 +1,4 @@
-"""
+﻿"""
 API Routers package for MedVerify.
 """
 from src.routers.check import router as check_router
@@ -8,6 +8,7 @@ from src.routers.reports import router as reports_router
 from src.routers.uploads import router as uploads_router
 from src.routers.batches import router as batches_router
 from src.routers.admin import router as admin_router
+from src.routers.auth import router as auth_router
 
 __all__ = [
     "check_router",
@@ -17,4 +18,5 @@ __all__ = [
     "uploads_router",
     "batches_router",
     "admin_router",
+    "auth_router",
 ]

@@ -1,4 +1,5 @@
-import { getAnonymousId } from './session';
+﻿import { getAnonymousId } from './session';
+import { getAuthHeaders } from './auth';
 import type { VerificationResponse } from '../types/api';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
@@ -16,6 +17,7 @@ export async function submitVerification(query: UnifiedQuery): Promise<Verificat
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'X-Anonymous-Id': anonId,
+    ...getAuthHeaders(),
   };
 
   // If an image is provided, upload first then investigate
@@ -95,7 +97,7 @@ export async function submitVerification(query: UnifiedQuery): Promise<Verificat
       status_category: data.status_category || 'CLEAR',
       summary:
         data.summary ||
-        `Packaging photo uploaded and processed via Bedrock Multimodal Vision pipeline (${query.imageFile?.name || 'scan'}).`,
+        `Packaging photo processed via Google Gemini Flash Multimodal OCR pipeline (${query.imageFile?.name || 'scan'}).`,
       official_record: data.batch_record || null,
       community_flag: false,
       disclaimer: data.limitation_statement || 'Absence of a flag is not proof of safety.',
@@ -104,12 +106,12 @@ export async function submitVerification(query: UnifiedQuery): Promise<Verificat
       reasoning_trace: data.reasoning_trace || [
         `Step 1: Uploaded packaging artifact to S3 bucket 'medverify-uploads' (${query.imageFile?.name || 'packaging.jpg'}).`,
         'Step 2: Orchestrator detected visual modality -> routed to Reactive Agent Tier.',
-        'Step 3: Initiated multimodal extraction via Amazon Rekognition.',
+        'Step 3: Initiated multimodal extraction via Google Gemini Flash OCR.',
       ],
       extracted_fields: data.extracted_fields || {
         batch_no: query.batchNo || (textQuery ? textQuery : 'Auto-extracted'),
         drug_name: query.drugName || (textQuery ? textQuery : 'Packaging scan'),
-        ocr_confidence: 0.96,
+        ocr_confidence: 0.95,
       },
     };
   }
@@ -174,6 +176,7 @@ export async function submitFeedback(sessionId: string, helpful: boolean, commen
       headers: {
         'Content-Type': 'application/json',
         'X-Anonymous-Id': anonId,
+        ...getAuthHeaders(),
       },
       body: JSON.stringify({ helpful, comment }),
     });
@@ -195,6 +198,8 @@ export async function submitCommunityReport(report: {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'X-Anonymous-Id': getAnonymousId(),
+        ...getAuthHeaders(),
       },
       body: JSON.stringify(report),
     });
@@ -206,7 +211,11 @@ export async function submitCommunityReport(report: {
 
 export async function getManufacturerDetails(manufacturerId: string) {
   try {
-    const res = await fetch(`${API_BASE}/manufacturers/${encodeURIComponent(manufacturerId)}`);
+    const res = await fetch(`${API_BASE}/manufacturers/${encodeURIComponent(manufacturerId)}`, {
+      headers: {
+        ...getAuthHeaders(),
+      },
+    });
     if (res.ok) return await res.json();
     return null;
   } catch {
@@ -216,7 +225,11 @@ export async function getManufacturerDetails(manufacturerId: string) {
 
 export async function getRegulatoryNotices() {
   try {
-    const res = await fetch(`${API_BASE}/batches/notices/list`);
+    const res = await fetch(`${API_BASE}/batches/notices/list`, {
+      headers: {
+        ...getAuthHeaders(),
+      },
+    });
     if (res.ok) {
       const data = await res.json();
       return data.documents || [];
@@ -230,7 +243,10 @@ export async function getRegulatoryNotices() {
 export async function triggerWebScraper() {
   const res = await fetch(`${API_BASE}/batches/notices/scrape`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeaders(),
+    },
     body: JSON.stringify({}),
   });
   if (!res.ok) {
@@ -238,4 +254,3 @@ export async function triggerWebScraper() {
   }
   return await res.json();
 }
-

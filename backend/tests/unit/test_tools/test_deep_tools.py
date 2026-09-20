@@ -1,23 +1,18 @@
-import pytest
+﻿import pytest
 from unittest.mock import patch, MagicMock
 from src.tools.deep_tools import (
     retrieve_related_notices,
     retrieve_similar_cases,
 )
 
-@patch("src.tools.deep_tools.get_bedrock_agent_runtime_client")
-def test_retrieve_related_notices(mock_get_client):
-    mock_client = MagicMock()
-    mock_get_client.return_value = mock_client
-    mock_client.retrieve.return_value = {
-        "retrievalResults": [
-            {
-                "content": {"text": "Notice of quality failure"},
-                "location": {"s3Location": {"uri": "s3://bucket/notice1.txt"}},
-                "score": 0.95,
-            }
-        ]
-    }
+@patch("src.tools.deep_tools.opensearch_search")
+def test_retrieve_related_notices(mock_search):
+    mock_search.return_value = [
+        {
+            "_source": {"search_text": "Notice of quality failure", "s3_uri": "s3://bucket/notice1.txt"},
+            "_score": 0.95,
+        }
+    ]
 
     res = retrieve_related_notices.invoke({"query_text": "paracetamol failure"})
     assert len(res["results"]) == 1
@@ -34,4 +29,3 @@ def test_retrieve_similar_cases(mock_skill):
     res = retrieve_similar_cases.invoke({"batch_no": "B-123", "drug_name": "Paracetamol"})
     assert res["count"] == 1
     assert res["reports"][0]["report_id"] == "rep-1"
-

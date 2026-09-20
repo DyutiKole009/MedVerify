@@ -1,13 +1,15 @@
-"""
+﻿"""
 Sessions & Feedback API router (§12.1 GET /sessions/{id} & POST /sessions/{id}/feedback).
+Also provides user session history (§8 GET /users/{user_id}/sessions).
 """
 from datetime import datetime, timezone
-from typing import Dict, Any
+from typing import Dict, Any, List
 from fastapi import APIRouter, HTTPException, Depends
+from boto3.dynamodb.conditions import Key, Attr
 
 from src.models.schemas import FeedbackRequest
 from src.tools.aws import get_dynamodb_resource, convert_decimals_to_primitives
-from src.dependencies.auth import get_current_user_optional
+from src.dependencies.auth import get_current_user_optional, require_authenticated_user
 from src.config import settings
 
 router = APIRouter()

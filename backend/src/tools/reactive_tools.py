@@ -1,4 +1,4 @@
-"""Fixed-step tools used by the Reactive Agent."""
+﻿"""Fixed-step tools used by the Reactive Agent."""
 import json
 import re
 from typing import Any, Dict
@@ -13,12 +13,11 @@ from src.config import settings
 from src.tools.aws import (
     get_dynamodb_resource,
     get_s3_client,
-    get_bedrock_runtime_client,
-    get_rekognition_client,
     convert_floats_to_decimals,
     opensearch_search,
 )
 from src.tools.skill_tools import check_batch, get_community_reports, get_manufacturer_history
+from src.utils.logger import logger
 
 KNOWN_MANUFACTURERS = [
     "Cipla", "Sun Pharma", "Micro Labs", "Alkem", "Dr. Reddy", "Lupin",
@@ -39,6 +38,22 @@ BRAND_TO_MFG = {
     "METOGYL": "J.B. Chemicals & Pharmaceuticals",
 }
 
+EXTRACTION_SYSTEM_PROMPT = """You are a pharmaceutical packaging OCR specialist.
+Extract all medicine details from the packaging image provided.
+Return ONLY valid JSON with these exact fields:
+{
+  "drug_name": "string or null",
+  "batch_no": "string or null",
+  "manufacturer_name": "string or null",
+  "mfg_date": "string or null",
+  "expiry_date": "string or null",
+  "confidence": "high|medium|low",
+  "ocr_confidence": float between 0.0 and 1.0,
+  "raw_lines": ["array", "of", "text", "lines"],
+  "unreadable_fields": ["list of field names that could not be read"]
+}
+Never guess. If a field is not visible, set it to null and add its name to unreadable_fields."""
+
 
 def _clean_json_markdown(raw_text: str) -> str:
     """Strips markdown code blocks like ```json ... ``` from model outputs."""
@@ -49,117 +64,118 @@ def _clean_json_markdown(raw_text: str) -> str:
     return text
 
 
+def _get_gemini_client():
+    """Returns an initialised google.genai Client using GEMINI_API_KEY."""
+    from google import genai
+    api_key = settings.GEMINI_API_KEY
+    if api_key:
+        return genai.Client(api_key=api_key)
+    return genai.Client()
+
+
+def _get_groq_client():
+    """Returns an initialised Groq client using GROQ_API_KEY."""
+    from groq import Groq
+    api_key = settings.GROQ_API_KEY
+    if not api_key:
+        raise ValueError("GROQ_API_KEY is not set.")
+    return Groq(api_key=api_key)
+
+
 @tool
 def extract_from_image(image_s3_key: str, mime_type: str = "image/jpeg") -> Dict[str, Any]:
-    """Extract medicine fields from packaging photo using Amazon Rekognition OCR and regex heuristics."""
-    rek = get_rekognition_client()
+    """
+    Extract medicine fields from a packaging photo using Gemini Flash multimodal OCR.
+    Downloads the image from S3 then passes raw bytes + extraction prompt to Gemini.
+    """
+    # Download image bytes from S3
     try:
-        response = rek.detect_text(
-            Image={"S3Object": {"Bucket": settings.S3_UPLOADS_BUCKET, "Name": image_s3_key}}
-        )
-    except Exception as e:
-        # Fallback to reading image bytes directly
         s3 = get_s3_client()
-        image_bytes = s3.get_object(Bucket=settings.S3_UPLOADS_BUCKET, Key=image_s3_key)["Body"].read()
-        response = rek.detect_text(Image={"Bytes": image_bytes})
+        image_bytes = s3.get_object(
+            Bucket=settings.S3_UPLOADS_BUCKET, Key=image_s3_key
+        )["Body"].read()
+    except Exception as s3_exc:
+        logger.warning(f"[OCR] S3 download failed for {image_s3_key}: {s3_exc}")
+        return {
+            "drug_name": "Unknown Medicine",
+            "batch_no": None,
+            "manufacturer_name": "Not detected in photo",
+            "mfg_date": None,
+            "expiry_date": None,
+            "confidence": "low",
+            "ocr_confidence": 0.0,
+            "raw_lines": [],
+            "unreadable_fields": ["image_source", "batch_no", "expiry_date", "manufacturer"],
+            "error": str(s3_exc),
+        }
 
-    detections = response.get("TextDetections", [])
-    lines = [d["DetectedText"] for d in detections if d.get("Type") == "LINE"]
-    confidences = [d.get("Confidence", 90.0) for d in detections if d.get("Type") == "LINE"]
+    model_id = settings.GEMINI_MODEL_ID or "gemini-2.5-flash"
+    logger.info(f"[GEMINI REQUEST] [Multimodal OCR] Model='{model_id}' ImageBytes={len(image_bytes)} MimeType='{mime_type}'")
 
-    avg_conf = (sum(confidences) / len(confidences) / 100.0) if confidences else 0.90
-    full_text = " \n ".join(lines)
+    try:
+        from google.genai import types
+        client = _get_gemini_client()
+        part = types.Part.from_bytes(data=image_bytes, mime_type=mime_type or "image/jpeg")
+        response = client.models.generate_content(
+            model=model_id,
+            contents=[
+                part,
+                "Inspect this pharmaceutical packaging photo and extract all medicine details.",
+            ],
+            config=types.GenerateContentConfig(
+                system_instruction=EXTRACTION_SYSTEM_PROMPT,
+                temperature=0.0,
+                response_mime_type="application/json",
+            ),
+        )
+        cleaned = _clean_json_markdown(response.text or "{}")
+        data = json.loads(cleaned)
 
-    # 1. Batch No
-    batch_match = re.search(
-        r"(?:B\.?\s*No\.?|Batch(?:\s*No\.?)?|Lot(?:\s*No\.?)?|B\.N\.)[\s.:-]*([A-Za-z0-9/-]{3,20})",
-        full_text,
-        re.IGNORECASE,
-    )
-    batch_no = batch_match.group(1).strip() if batch_match else None
+        drug_name   = data.get("drug_name") or "Unknown Medicine"
+        batch_no    = data.get("batch_no")
+        mfg         = data.get("manufacturer_name") or "Not detected in photo"
+        mfg_date    = data.get("mfg_date")
+        exp_date    = data.get("expiry_date")
+        raw_lines   = data.get("raw_lines") or []
+        unreadable  = data.get("unreadable_fields") or []
 
-    # 2. Expiry Date
-    exp_match = re.search(
-        r"(?:EXP\.?(?:\s*DATE)?|Expiry(?:\s*Date)?)[\s.:-]*([A-Za-z]{3}[.\s/-]*[0-9]{2,4}|[0-9]{1,2}[/-][0-9]{2,4})",
-        full_text,
-        re.IGNORECASE,
-    )
-    expiry_date = exp_match.group(1).strip() if exp_match else None
+        if not batch_no and "batch_no" not in unreadable:
+            unreadable.append("batch_no")
+        if not exp_date and "expiry_date" not in unreadable:
+            unreadable.append("expiry_date")
 
-    # 3. Mfg Date
-    mfd_match = re.search(
-        r"(?:MFD\.?(?:\s*DATE)?|Mfg(?:\s*Date)?)[\s.:-]*([A-Za-z]{3}[.\s/-]*[0-9]{2,4}|[0-9]{1,2}[/-][0-9]{2,4})",
-        full_text,
-        re.IGNORECASE,
-    )
-    mfg_date = mfd_match.group(1).strip() if mfd_match else None
+        ocr_conf = float(data.get("ocr_confidence", 0.90))
+        conf_label = data.get("confidence") or (
+            "high" if batch_no and drug_name != "Unknown Medicine" else "medium"
+        )
 
-    # 4. Brand Name
-    detected_brand = None
-    for l in lines:
-        for b in BRAND_TO_MFG:
-            if b in l.upper():
-                detected_brand = l.strip()
-                break
-        if detected_brand:
-            break
-
-    # 5. Generic / Formulation
-    composition_candidates = []
-    for l in lines:
-        lower = l.lower()
-        if any(ig in lower for ig in ["dosage", "store", "contains", "reach of", "warning", "keep", "dreamstime", "below", "daily", "maximum", "upto", "physician", "cause", "damage", "divided", "dose", "adults"]):
-            continue
-        if any(kw in lower for kw in ["tablets", "capsules", "suspension", "syrup", "ointment", " ip", " bp", " usp"]):
-            composition_candidates.append(l.strip())
-
-    best_comp = max(composition_candidates, key=len) if composition_candidates else None
-
-    final_drug = detected_brand or best_comp or (lines[0] if lines else "Unknown Medicine")
-    if detected_brand and best_comp and detected_brand.lower() not in best_comp.lower():
-        final_drug = f"{detected_brand} ({best_comp})"
-
-    # 6. Manufacturer
-    mfg = None
-    mfg_match = re.search(
-        r"(?:Mfg\.?\s*(?:by|in)?|Marketed\s*by|Manufactured\s*by)[\s.:-]*([A-Za-z\s.,&]+?(?:Ltd|Limited|Laboratories|Pharma|Pvt|Inc))",
-        full_text,
-        re.IGNORECASE,
-    )
-    if mfg_match:
-        mfg = mfg_match.group(1).strip()
-    else:
-        for km in KNOWN_MANUFACTURERS:
-            if re.search(r"\b" + re.escape(km) + r"\b", full_text, re.IGNORECASE):
-                mfg = km
-                break
-        if not mfg and detected_brand:
-            for b, m in BRAND_TO_MFG.items():
-                if b in detected_brand.upper():
-                    mfg = m
-                    break
-
-    unreadable = []
-    if not batch_no:
-        unreadable.append("batch_no")
-    if not expiry_date:
-        unreadable.append("expiry_date")
-    if not mfg:
-        unreadable.append("manufacturer")
-
-    confidence_label = "high" if avg_conf > 0.85 else ("medium" if avg_conf > 0.70 else "low")
-
-    return {
-        "drug_name": final_drug,
-        "batch_no": batch_no,
-        "manufacturer_name": mfg or "Not detected in photo",
-        "mfg_date": mfg_date,
-        "expiry_date": expiry_date,
-        "confidence": confidence_label,
-        "ocr_confidence": round(avg_conf, 2),
-        "raw_lines": lines,
-        "unreadable_fields": unreadable,
-    }
+        logger.info(f"[GEMINI RESPONSE] [Multimodal OCR] Drug='{drug_name}' Batch='{batch_no}' Mfg='{mfg}' Confidence={ocr_conf}")
+        return {
+            "drug_name": drug_name,
+            "batch_no": batch_no,
+            "manufacturer_name": mfg,
+            "mfg_date": mfg_date,
+            "expiry_date": exp_date,
+            "confidence": conf_label,
+            "ocr_confidence": ocr_conf,
+            "raw_lines": raw_lines,
+            "unreadable_fields": unreadable,
+            "gemini_available": True,
+        }
+    except Exception as exc:
+        logger.warning(f"Gemini multimodal OCR failed: {exc}. Returning low-confidence fallback.")
+        return {
+            "drug_name": "Unknown Medicine",
+            "batch_no": None,
+            "manufacturer_name": "Not detected in photo",
+            "mfg_date": None,
+            "expiry_date": None,
+            "confidence": "low",
+            "ocr_confidence": 0.50,
+            "raw_lines": [],
+            "unreadable_fields": ["batch_no", "expiry_date", "manufacturer"],
+            "error": str(exc),
+        }
 
 
 @tool
@@ -177,10 +193,10 @@ def normalize_and_resolve(extraction: Dict[str, Any]) -> Dict[str, Any]:
                 "search_text": {
                     "value": query_text,
                     "fuzziness": "AUTO",
-                    "prefix_length": 1
+                    "prefix_length": 1,
                 }
             }
-        }
+        },
     }
     hits = opensearch_search(settings.OPENSEARCH_INDEX_DRUGS, query)
     candidates = [
@@ -218,20 +234,20 @@ def run_parallel_checks(resolved: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _build_deterministic_explanation(extraction: Dict[str, Any], checks: Dict[str, Any]) -> str:
-    """Build a plain-text summary from evidence data without calling Bedrock."""
-    drug = extraction.get("drug_name", "Unknown Medicine")
-    batch = extraction.get("batch_no", "N/A")
-    mfg = extraction.get("manufacturer_name", "Not detected")
+    """Build a plain-text summary from evidence data without calling any model."""
+    drug   = extraction.get("drug_name", "Unknown Medicine")
+    batch  = extraction.get("batch_no", "N/A")
+    mfg    = extraction.get("manufacturer_name", "Not detected")
     expiry = extraction.get("expiry_date", "N/A")
 
-    batch_status = checks.get("batch", {})
-    mfg_status = checks.get("manufacturer", {})
+    batch_status     = checks.get("batch", {})
+    mfg_status       = checks.get("manufacturer", {})
     community_status = checks.get("community", {})
 
-    nsq_flag = batch_status.get("nsq_alert") or batch_status.get("status") == "NSQ"
-    spurious_flag = batch_status.get("spurious_alert")
+    nsq_flag         = batch_status.get("nsq_alert") or batch_status.get("status") == "NSQ"
+    spurious_flag    = batch_status.get("spurious_alert")
     community_reports = community_status.get("report_count", 0)
-    mfg_risk = mfg_status.get("risk_profile", "Unknown")
+    mfg_risk         = mfg_status.get("risk_profile", "Unknown")
 
     lines = [
         f"Medicine: {drug}",
@@ -259,41 +275,46 @@ def _build_deterministic_explanation(extraction: Dict[str, Any], checks: Dict[st
 
 @tool
 def synthesize_evidence(extraction: Dict[str, Any], checks: Dict[str, Any]) -> Dict[str, Any]:
-    """Generate a sourced, non-verdict explanation from extracted evidence."""
-    prompt = (
+    """
+    Generate a sourced, non-verdict plain-language explanation from extracted evidence.
+    Uses Groq (fast LLM) to narrate findings; falls back to deterministic text if Groq fails.
+    """
+    system_prompt = (
         "Explain only official and community evidence for this medicine. "
         "Never claim a medicine is genuine or safe. "
         "Always state that absence of a flag is not proof of safety."
     )
-    messages = [{
-        "role": "user",
-        "content": [{"text": json.dumps({"extraction": extraction, "checks": checks})}]
-    }]
+    user_content = json.dumps({"extraction": extraction, "checks": checks})
+    model = settings.GROQ_MODEL_ID or "llama-3.3-70b-versatile"
+    logger.info(f"[GROQ REQUEST] [Evidence Synthesis] Model='{model}' Prompting clinical & regulatory evidence synthesis")
 
     try:
-        bedrock = get_bedrock_runtime_client()
-        response = bedrock.converse(
-            modelId=settings.BEDROCK_SYNTHESIS_MODEL_ID,
-            messages=messages,
-            system=[{"text": prompt}],
-            inferenceConfig={"maxTokens": 2048, "temperature": 0.0},
+        client = _get_groq_client()
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content},
+            ],
+            temperature=0.0,
+            max_tokens=2048,
         )
-        result = response.get("output", {}).get("message", {}).get("content", [{}])[0].get("text", "")
+        result = response.choices[0].message.content or ""
+        logger.info(f"[GROQ RESPONSE] [Evidence Synthesis] Synthesis generated: {len(result)} chars")
         return {
             "explanation": result,
             "evidence": checks,
             "limitation_statement": "Absence of a flag is not proof of safety.",
-            "bedrock_available": True,
+            "groq_available": True,
         }
     except Exception as exc:
-        # Bedrock unavailable (auth, quota, region) — return deterministic summary so the
-        # pipeline can still complete and store a usable result.
+        logger.warning(f"Groq synthesis failed: {exc}. Using deterministic fallback.")
         return {
             "explanation": _build_deterministic_explanation(extraction, checks),
             "evidence": checks,
             "limitation_statement": "Absence of a flag is not proof of safety.",
-            "bedrock_available": False,
-            "bedrock_error": str(exc),
+            "groq_available": False,
+            "groq_error": str(exc),
         }
 
 

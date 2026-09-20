@@ -1,4 +1,4 @@
-import pytest
+﻿import pytest
 from moto import mock_aws
 import boto3
 from fastapi.testclient import TestClient
@@ -15,11 +15,26 @@ client = TestClient(app)
 def setup_aws():
     with mock_aws():
         dynamo = boto3.client("dynamodb", region_name=settings.AWS_REGION)
-        # Batches table
+        # Batches table with GSI2
         dynamo.create_table(
             TableName=settings.DYNAMODB_BATCHES_TABLE,
             KeySchema=[{"AttributeName": "PK", "KeyType": "HASH"}, {"AttributeName": "SK", "KeyType": "RANGE"}],
-            AttributeDefinitions=[{"AttributeName": "PK", "AttributeType": "S"}, {"AttributeName": "SK", "AttributeType": "S"}],
+            AttributeDefinitions=[
+                {"AttributeName": "PK", "AttributeType": "S"},
+                {"AttributeName": "SK", "AttributeType": "S"},
+                {"AttributeName": "GSI2PK", "AttributeType": "S"},
+                {"AttributeName": "GSI2SK", "AttributeType": "S"},
+            ],
+            GlobalSecondaryIndexes=[
+                {
+                    "IndexName": "GSI2",
+                    "KeySchema": [
+                        {"AttributeName": "GSI2PK", "KeyType": "HASH"},
+                        {"AttributeName": "GSI2SK", "KeyType": "RANGE"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                }
+            ],
             BillingMode="PAY_PER_REQUEST",
         )
         # Sessions table
@@ -27,6 +42,13 @@ def setup_aws():
             TableName=settings.DYNAMODB_SESSIONS_TABLE,
             KeySchema=[{"AttributeName": "PK", "KeyType": "HASH"}, {"AttributeName": "SK", "KeyType": "RANGE"}],
             AttributeDefinitions=[{"AttributeName": "PK", "AttributeType": "S"}, {"AttributeName": "SK", "AttributeType": "S"}],
+            BillingMode="PAY_PER_REQUEST",
+        )
+        # Manufacturers table
+        dynamo.create_table(
+            TableName=settings.DYNAMODB_MANUFACTURERS_TABLE,
+            KeySchema=[{"AttributeName": "PK", "KeyType": "HASH"}],
+            AttributeDefinitions=[{"AttributeName": "PK", "AttributeType": "S"}],
             BillingMode="PAY_PER_REQUEST",
         )
         # Reports table
@@ -90,12 +112,21 @@ def test_presign_upload_endpoint():
     assert "packaging-photos/" in data["s3_key"]
 
 
-def test_investigate_endpoint():
+@patch("src.routers.investigate.extract_from_image")
+def test_investigate_endpoint(mock_extract):
+    mock_extract.return_value = {
+        "drug_name": "Paracetamol",
+        "batch_no": "B99881",
+        "manufacturer_name": "Cipla",
+        "confidence": "high",
+        "ocr_confidence": 0.95,
+        "unreadable_fields": [],
+    }
     response = client.post("/investigate", json={"image_s3_key": "packaging-photos/photo_1.jpg"})
-    assert response.status_code == 202
+    assert response.status_code == 200
     data = response.json()
     assert "session_id" in data
-    assert data["status"] == "PROCESSING"
+    assert data["status"] == "DONE"
 
 
 def test_investigate_deep_endpoint():

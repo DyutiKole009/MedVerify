@@ -1,4 +1,4 @@
-"""
+﻿"""
 Custom exceptions for MedVerify AWS wrappers and domain services.
 """
 from typing import Optional, Dict, Any
@@ -30,11 +30,11 @@ class ValidationException(AWSWrapperException):
     pass
 
 class RateLimitException(AWSWrapperException):
-    """Raised when AWS API throttling occurs."""
+    """Raised when API throttling occurs."""
     pass
 
-class ModelInferenceException(AWSWrapperException):
-    """Raised when Bedrock model invocation or structured generation fails."""
+class ModelInferenceException(MedVerifyException):
+    """Raised when LLM model invocation or structured generation fails."""
     pass
 
 class TextractProcessingException(AWSWrapperException):

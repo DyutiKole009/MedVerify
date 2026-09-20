@@ -1,10 +1,10 @@
-"""
+﻿"""
 Investigation API routers (§12.1 POST /investigate & POST /investigate/deep).
 """
 import uuid
 from datetime import datetime, timezone
 from typing import Dict, Any
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, BackgroundTasks, Depends, status
 
 from src.models.schemas import (
     InvestigateRequest,
@@ -17,8 +17,24 @@ from src.tools.reactive_tools import extract_from_image
 from src.tools.skill_tools import check_batch
 from src.dependencies.auth import get_current_user_optional
 from src.config import settings
+from src.utils.logger import logger
 
 router = APIRouter()
+
+
+def _run_deep_agent_background(session_id: str, request: DeepInvestigateRequest):
+    """Executes Deep Agent autonomously with Gemini in background."""
+    try:
+        from src.agents.deep_agent import run_deep_agent
+        run_deep_agent(
+            text=request.description,
+            batch_no=request.batch_no,
+            drug_name=request.drug_name,
+            session_id=session_id,
+        )
+        logger.info(f"Deep Agent background task completed for session {session_id}")
+    except Exception as exc:
+        logger.warning(f"Background deep agent execution failed for session {session_id}: {exc}")
 
 
 @router.post("", response_model=ProcessingResponse, status_code=status.HTTP_200_OK)
@@ -28,12 +44,12 @@ def start_reactive_investigation(
 ) -> ProcessingResponse:
     """
     Submits a packaging photo for full reactive verification (§12.1).
-    Performs Amazon Rekognition OCR, parses medicine fields, and checks CDSCO records.
+    Performs Gemini Flash multimodal OCR, parses medicine fields, and checks CDSCO records.
     """
     session_id = str(uuid.uuid4())
     decision = orchestrate(has_image=True, image_s3_key=request.image_s3_key)
 
-    # Perform Rekognition extraction
+    # Perform Gemini Flash multimodal extraction
     extracted = extract_from_image(request.image_s3_key, request.mime_type)
     batch_no = extracted.get("batch_no")
     drug_name = extracted.get("drug_name")
@@ -48,7 +64,7 @@ def start_reactive_investigation(
 
     reasoning_trace = [
         f"Step 1: Uploaded packaging artifact to S3 bucket '{settings.S3_UPLOADS_BUCKET}'.",
-        f"Step 2: Amazon Rekognition detected packaging text with {int(extracted.get('ocr_confidence', 0.9)*100)}% average confidence.",
+        f"Step 2: Google Gemini Flash multimodal OCR detected packaging text with {int(extracted.get('ocr_confidence', 0.9)*100)}% confidence.",
         f"Step 3: Identified Drug: '{drug_name}' | Manufacturer: '{mfg_name}'.",
     ]
     if batch_no:
@@ -111,11 +127,13 @@ def start_reactive_investigation(
 @router.post("/deep", response_model=ProcessingResponse, status_code=status.HTTP_202_ACCEPTED)
 def start_deep_investigation(
     request: DeepInvestigateRequest,
+    background_tasks: BackgroundTasks,
     user: Dict[str, Any] = Depends(get_current_user_optional),
 ) -> ProcessingResponse:
     """
     Submits an open suspicion or ambiguous case for autonomous deep investigation (§12.1).
     Returns 202 Accepted with a session_id for polling.
+    Fires the Gemini Deep Agent in the background.
     """
     session_id = str(uuid.uuid4())
     decision = orchestrate(
@@ -146,6 +164,9 @@ def start_deep_investigation(
         "created_at": now_iso,
     }
     sessions_table.put_item(Item=convert_floats_to_decimals(session_item))
+
+    # Trigger autonomous background investigation with Gemini
+    background_tasks.add_task(_run_deep_agent_background, session_id, request)
 
     return ProcessingResponse(
         session_id=session_id,

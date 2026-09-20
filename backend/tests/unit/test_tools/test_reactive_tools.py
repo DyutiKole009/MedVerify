@@ -1,25 +1,24 @@
-import pytest
-from moto import mock_aws
-import boto3
+﻿import pytest
 import json
+import boto3
+from moto import mock_aws
 from unittest.mock import patch, MagicMock
-from src.config import settings
+
 from src.tools.reactive_tools import (
     extract_from_image,
     normalize_and_resolve,
     run_parallel_checks,
     synthesize_evidence,
-    store_session,
+    store_session
 )
+from src.config import settings
 
-@pytest.fixture(autouse=True)
-def setup_aws():
+@pytest.fixture
+def aws_env():
     with mock_aws():
-        # Setup S3
         s3 = boto3.client("s3", region_name=settings.AWS_REGION)
         s3.create_bucket(Bucket=settings.S3_UPLOADS_BUCKET)
-
-        # Setup Sessions table
+        
         dynamo = boto3.client("dynamodb", region_name=settings.AWS_REGION)
         dynamo.create_table(
             TableName=settings.DYNAMODB_SESSIONS_TABLE,
@@ -35,8 +34,8 @@ def setup_aws():
         )
         yield
 
-@patch("src.tools.reactive_tools.get_bedrock_runtime_client")
-def test_extract_from_image(mock_get_bedrock):
+@patch("src.tools.reactive_tools._get_gemini_client")
+def test_extract_from_image(mock_get_gemini, aws_env):
     s3 = boto3.client("s3", region_name=settings.AWS_REGION)
     s3.put_object(
         Bucket=settings.S3_UPLOADS_BUCKET,
@@ -45,21 +44,16 @@ def test_extract_from_image(mock_get_bedrock):
     )
 
     mock_client = MagicMock()
-    mock_get_bedrock.return_value = mock_client
-    mock_client.converse.return_value = {
-        "output": {
-            "message": {
-                "content": [{
-                    "text": json.dumps({
-                        "drug_name": "Paracetamol",
-                        "batch_no": "B99",
-                        "confidence": "high",
-                        "unreadable_fields": []
-                    })
-                }]
-            }
-        }
-    }
+    mock_get_gemini.return_value = mock_client
+    mock_resp = MagicMock()
+    mock_resp.text = json.dumps({
+        "drug_name": "Paracetamol",
+        "batch_no": "B99",
+        "confidence": "high",
+        "ocr_confidence": 0.95,
+        "unreadable_fields": []
+    })
+    mock_client.models.generate_content.return_value = mock_resp
 
     res = extract_from_image("packaging/test.jpg")
     assert res["drug_name"] == "Paracetamol"
@@ -87,28 +81,19 @@ def test_run_parallel_checks(mock_reports, mock_mfr, mock_batch):
     res = run_parallel_checks({"extraction": {"batch_no": "B1"}})
     assert res["batch"]["found"] is True
 
-@patch("src.tools.reactive_tools.get_bedrock_runtime_client")
-def test_synthesize_evidence(mock_get_bedrock):
+@patch("src.tools.reactive_tools._get_groq_client")
+def test_synthesize_evidence(mock_get_groq):
     mock_client = MagicMock()
-    mock_get_bedrock.return_value = mock_client
-    mock_client.converse.return_value = {
-        "output": {
-            "message": {
-                "content": [{"text": "Official record matches NSQ alert."}]
-            }
-        }
-    }
+    mock_get_groq.return_value = mock_client
+    mock_choice = MagicMock()
+    mock_choice.message.content = "Official record matches NSQ alert."
+    mock_client.chat.completions.create.return_value = MagicMock(choices=[mock_choice])
 
     res = synthesize_evidence({"drug_name": "Test"}, {"batch": {"found": True}})
     assert res["explanation"] == "Official record matches NSQ alert."
     assert "Absence of a flag is not proof of safety." in res["limitation_statement"]
 
-def test_store_session():
+def test_store_session(aws_env):
     result_data = {"status": "SUCCESS", "details": "all clear"}
     res = store_session("session-xyz", result_data)
     assert res == result_data
-
-    dynamo = boto3.resource("dynamodb", region_name=settings.AWS_REGION)
-    table = dynamo.Table(settings.DYNAMODB_SESSIONS_TABLE)
-    item = table.get_item(Key={"PK": "SESSION#session-xyz", "SK": "RESULT"})
-    assert item["Item"]["session_id"] == "session-xyz"

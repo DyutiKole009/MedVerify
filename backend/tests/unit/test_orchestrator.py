@@ -1,4 +1,4 @@
-import pytest
+﻿import pytest
 import json
 from unittest.mock import patch, MagicMock
 from src.agents.orchestrator import orchestrate, fallback_decision, OrchestratorDecision
@@ -24,28 +24,22 @@ def test_fallback_text_only():
     assert decision.intent == "batch_lookup"
 
 
-@patch("src.agents.orchestrator.get_bedrock_runtime_client")
-def test_orchestrate_with_bedrock_deep(mock_get_bedrock):
-    mock_bedrock = MagicMock()
-    mock_get_bedrock.return_value = mock_bedrock
-    
-    expected_response = {
-        "intent": "open_investigation",
-        "complexity": "HIGH",
-        "ambiguity": "HIGH",
-        "known_workflow": False,
-        "capabilities_required": 5,
-        "selected_tier": "DEEP",
-        "reasoning": "User reports unusual side effect and suspected counterfeit blister pack."
-    }
-    
-    mock_bedrock.converse.return_value = {
-        "output": {
-            "message": {
-                "content": [{"text": json.dumps(expected_response)}]
-            }
-        }
-    }
+@patch("src.agents.orchestrator.get_orchestrator_agent")
+def test_orchestrate_with_strands_deep(mock_get_agent):
+    mock_agent = MagicMock()
+    expected_response = OrchestratorDecision(
+        intent="open_investigation",
+        complexity="HIGH",
+        ambiguity="HIGH",
+        known_workflow=False,
+        capabilities_required=5,
+        selected_tier="DEEP",
+        reasoning="User reports unusual side effect and suspected counterfeit blister pack."
+    )
+    mock_result = MagicMock()
+    mock_result.structured_output = expected_response
+    mock_agent.return_value = mock_result
+    mock_get_agent.return_value = mock_agent
 
     decision = orchestrate(text="I took this medicine and developed a severe rash, the foil looks unusual.")
     assert decision.selected_tier == "DEEP"
@@ -53,13 +47,12 @@ def test_orchestrate_with_bedrock_deep(mock_get_bedrock):
     assert decision.intent == "open_investigation"
 
 
-@patch("src.agents.orchestrator.get_bedrock_runtime_client")
-def test_orchestrate_bedrock_error_fallback(mock_get_bedrock):
-    mock_bedrock = MagicMock()
-    mock_get_bedrock.return_value = mock_bedrock
-    mock_bedrock.converse.side_effect = RuntimeError("Bedrock quota exceeded")
+@patch("src.agents.orchestrator.get_orchestrator_agent")
+def test_orchestrate_error_fallback(mock_get_agent):
+    mock_agent = MagicMock()
+    mock_agent.side_effect = RuntimeError("Rate limit exceeded")
+    mock_get_agent.return_value = mock_agent
 
-    # When Bedrock throws, it should gracefully fall back
     decision = orchestrate(text="Is this fake?", has_image=True)
     assert decision.selected_tier == "REACTIVE"
     assert "Fallback applied" in decision.reasoning or "Classification error" in decision.reasoning

@@ -1,26 +1,32 @@
+﻿"""
+AWS service client factories, credentials management, and utility helpers.
+DynamoDB, S3, Textract, Rekognition, OpenSearch Serverless, and Gemini client.
 """
-AWS client helpers and utility functions loaded directly from environment settings.
-"""
-from typing import Any, Dict, List, Optional
-from decimal import Decimal
 import json
+from decimal import Decimal
+from typing import Any, Dict, List, Optional
 import boto3
 from botocore.auth import SigV4Auth
 from botocore.awsrequest import AWSRequest
 import requests
 
 from src.config import settings
+from src.utils.logger import logger
+
+_BOTO_SESSION: Optional[boto3.Session] = None
 
 
 def get_boto_session() -> boto3.Session:
-    """Initializes a boto3 Session from environment settings."""
-    kwargs = {"region_name": settings.AWS_REGION}
-    if settings.AWS_ACCESS_KEY_ID and settings.AWS_SECRET_ACCESS_KEY:
-        kwargs["aws_access_key_id"] = settings.AWS_ACCESS_KEY_ID
-        kwargs["aws_secret_access_key"] = settings.AWS_SECRET_ACCESS_KEY
-        if settings.AWS_SESSION_TOKEN:
-            kwargs["aws_session_token"] = settings.AWS_SESSION_TOKEN
-    return boto3.Session(**kwargs)
+    """Returns cached boto3 Session configured with environment region and credentials."""
+    global _BOTO_SESSION
+    if _BOTO_SESSION is None:
+        _BOTO_SESSION = boto3.Session(
+            region_name=settings.AWS_REGION,
+            aws_access_key_id=settings.AWS_ACCESS_KEY_ID or None,
+            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY or None,
+            aws_session_token=settings.AWS_SESSION_TOKEN or None,
+        )
+    return _BOTO_SESSION
 
 
 def get_dynamodb_resource():
@@ -33,16 +39,6 @@ def get_s3_client():
     return get_boto_session().client("s3")
 
 
-def get_bedrock_runtime_client():
-    """Returns Bedrock Runtime client configured from env."""
-    return get_boto_session().client("bedrock-runtime")
-
-
-def get_bedrock_agent_runtime_client():
-    """Returns Bedrock Agent Runtime client for Knowledge Bases from env."""
-    return get_boto_session().client("bedrock-agent-runtime")
-
-
 def get_rekognition_client():
     """Returns Amazon Rekognition client configured from env."""
     return get_boto_session().client("rekognition")
@@ -53,9 +49,13 @@ def get_textract_client():
     return get_boto_session().client("textract")
 
 
-def get_agentcore_client():
-    """Returns Bedrock AgentCore Memory client from env."""
-    return get_boto_session().client("bedrock-agentcore")
+def get_gemini_client():
+    """Returns an initialized google.genai Client using GEMINI_API_KEY."""
+    from google import genai
+    api_key = settings.GEMINI_API_KEY or None
+    if api_key:
+        return genai.Client(api_key=api_key)
+    return genai.Client()
 
 
 def convert_floats_to_decimals(obj: Any) -> Any:
@@ -96,8 +96,12 @@ def opensearch_search(index_name: str, query: Dict[str, Any], endpoint: Optional
             SigV4Auth(frozen_creds, "aoss", settings.AWS_REGION).add_auth(request)
             headers = dict(request.headers)
 
-    response = requests.post(url, data=data, headers=headers, timeout=10)
-    if not response.ok:
+    try:
+        response = requests.post(url, data=data, headers=headers, timeout=10)
+        if not response.ok:
+            return []
+        hits = response.json().get("hits", {}).get("hits", [])
+        return hits
+    except Exception as exc:
+        logger.warning(f"OpenSearch query failed: {exc}")
         return []
-    hits = response.json().get("hits", {}).get("hits", [])
-    return hits

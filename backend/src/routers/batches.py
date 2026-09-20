@@ -1,35 +1,47 @@
-"""
+﻿"""
 Batches and Manufacturers API router (§12.2).
 """
-from typing import Dict, Any
+from typing import Dict, Any, List
 from fastapi import APIRouter, HTTPException
 
 from datetime import datetime, timezone
 from src.domain.normalization import normalize_batch_no
 from src.tools.skill_tools import check_batch, get_manufacturer_history
+from src.tools.aws import get_dynamodb_resource, convert_decimals_to_primitives
 from src.pipelines.nsq_ingestion.scraper import scrape_nsq_listing
+from src.config import settings
+from src.utils.logger import logger
 
 router = APIRouter()
 
 
 @router.get("/batches/notices/list")
 def list_regulatory_notices() -> Dict[str, Any]:
-    """Retrieves ingested regulatory gazette notices (§5.2)."""
-    return {
-        "documents": [
-            {
-                "id": "doc-2026-08-cdl",
-                "month": "2026-08",
-                "name": "Central Drugs Laboratory Alert Gazette (August 2026)",
-                "type": "CENTRAL",
-                "batchesFlagged": 8,
-                "spuriousCount": 2,
-                "url": "https://cdsco.gov.in/opencms/opencms/en/Notifications/nsq-drugs/",
-                "status": "INGESTED",
-                "docHash": "cdl-aug-2026-sha256-verified",
-            }
-        ]
-    }
+    """
+    Retrieves ingested regulatory gazette notices from IngestedDocs table (§5.2).
+    """
+    documents: List[Dict[str, Any]] = []
+    try:
+        dynamo = get_dynamodb_resource()
+        table = dynamo.Table(settings.DYNAMODB_INGESTED_DOCS_TABLE)
+        resp = table.scan(Limit=100)
+        for item in resp.get("Items", []):
+            item = convert_decimals_to_primitives(item)
+            documents.append({
+                "id": item.get("PK", ""),
+                "month": item.get("source_month", ""),
+                "name": item.get("doc_url", "Unknown Document").split("/")[-1],
+                "type": item.get("doc_type", "CENTRAL"),
+                "batchesFlagged": int(item.get("rows_extracted", 0)),
+                "spuriousCount": 0,
+                "url": item.get("doc_url", ""),
+                "status": "INGESTED" if item.get("parse_status") == "PARSED" else "DISCOVERED_CANDIDATE",
+                "docHash": item.get("PK", "").replace("DOC#", ""),
+            })
+    except Exception as exc:
+        logger.warning(f"IngestedDocs scan failed: {exc}. Returning empty list.")
+
+    return {"documents": documents}
 
 
 @router.post("/batches/notices/scrape")
