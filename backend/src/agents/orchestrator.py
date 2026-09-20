@@ -1,4 +1,4 @@
-﻿"""
+"""
 Orchestrator classification and tier routing logic (§9.1).
 Determines whether a query is resolved via SKILL, REACTIVE, or DEEP agent tiers.
 Uses Strands Agent with Groq (llama-3.3-70b-versatile).
@@ -83,13 +83,13 @@ def get_orchestrator_agent():
         from strands.models.openai import OpenAIModel
 
         api_key = getattr(settings, "GROQ_API_KEY", None) or os.environ.get("GROQ_API_KEY", "gsk_mock")
-        client = openai.Client(
-            base_url="https://api.groq.com/openai/v1",
-            api_key=api_key,
-        )
+        client_args = {
+            "base_url": "https://api.groq.com/openai/v1",
+            "api_key": api_key,
+        }
         model = OpenAIModel(
-            client=client,
-            model_id=getattr(settings, "GROQ_MODEL_ID", None) or "llama-3.3-70b-versatile",
+            model_id=getattr(settings, "GROQ_MODEL_ID", None) or "openai/gpt-oss-120b",
+            client_args=client_args,
         )
         return Agent(
             model=model,
@@ -194,7 +194,7 @@ def orchestrate(
         # Direct Groq fallback if Strands Agent was not initialized
         from groq import Groq
         groq_client = Groq(api_key=settings.GROQ_API_KEY)
-        model = settings.GROQ_MODEL_ID or "llama-3.3-70b-versatile"
+        model = settings.GROQ_MODEL_ID or "openai/gpt-oss-120b"
         response = groq_client.chat.completions.create(
             model=model,
             messages=[

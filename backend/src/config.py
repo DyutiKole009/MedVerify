@@ -1,4 +1,4 @@
-﻿"""
+"""
 Central configuration for MedVerify backend loaded directly from .env using python-dotenv.
 """
 
@@ -40,7 +40,7 @@ class Settings:
 
     # Groq — Orchestrator + Evidence Synthesis
     GROQ_API_KEY: str
-    GROQ_MODEL_ID: str       # default: llama-3.3-70b-versatile
+    GROQ_MODEL_ID: str       # default: openai/gpt-oss-120b
 
     # Gemini — Multimodal OCR + Deep Agent
     GEMINI_API_KEY: str
@@ -63,9 +63,9 @@ class Settings:
         if name == "AWS_REGION" and not val:
             return "us-east-1"
         if name == "GEMINI_MODEL_ID" and not val:
-            return "gemini-2.5-flash"
+            return "gemini-2.5-flash-lite"
         if name == "GROQ_MODEL_ID" and not val:
-            return "llama-3.3-70b-versatile"
+            return "openai/gpt-oss-120b"
         if name == "GEMINI_API_KEY" and not val:
             return os.getenv("GOOGLE_API_KEY", "")
         if name == "CORS_ORIGINS":

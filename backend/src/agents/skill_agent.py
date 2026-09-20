@@ -33,13 +33,13 @@ def get_skill_strands_agent():
         from strands.models.openai import OpenAIModel
 
         api_key = getattr(settings, "GROQ_API_KEY", None) or os.environ.get("GROQ_API_KEY", "gsk_mock")
-        client = openai.Client(
-            base_url="https://api.groq.com/openai/v1",
-            api_key=api_key,
-        )
+        client_args = {
+            "base_url": "https://api.groq.com/openai/v1",
+            "api_key": api_key,
+        }
         model = OpenAIModel(
-            client=client,
-            model_id=getattr(settings, "GROQ_MODEL_ID", None) or "llama-3.3-70b-versatile",
+            model_id=getattr(settings, "GROQ_MODEL_ID", None) or "openai/gpt-oss-120b",
+            client_args=client_args,
         )
         system_prompt = build_skills_system_prompt()
 
