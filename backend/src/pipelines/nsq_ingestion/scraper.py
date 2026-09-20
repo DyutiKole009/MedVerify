@@ -125,6 +125,29 @@ def fetch_live_cdsco_candidates(listing_url: str = "https://cdsco.gov.in/opencms
     return candidates
 
 
+def parse_listing_html(html_content: str, base_url: str = "https://cdsco.gov.in") -> List[CDSCODocCandidate]:
+    """Parses raw HTML listing and extracts CDSCODocCandidate objects."""
+    soup = BeautifulSoup(html_content, "html.parser")
+    candidates = []
+    seen = set()
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        title = a.get_text(strip=True)
+        if not href or href in seen:
+            continue
+        seen.add(href)
+        doc_url = urljoin(base_url, href)
+        doc_hash = hashlib.sha256(href.encode("utf-8")).hexdigest()[:16]
+        candidates.append(CDSCODocCandidate(
+            doc_url=doc_url,
+            doc_hash=doc_hash,
+            doc_type=classify_doc_type(title),
+            source_month=extract_source_month(title),
+            title=title,
+        ))
+    return candidates
+
+
 def scrape_nsq_listing(listing_url: str = "https://cdsco.gov.in/opencms/opencms/en/Notifications/nsq-drugs/") -> List[CDSCODocCandidate]:
     """Scrapes CDSCO notification portal for candidate documents."""
     candidates = fetch_live_cdsco_candidates(listing_url)
@@ -138,6 +161,7 @@ def scrape_nsq_listing(listing_url: str = "https://cdsco.gov.in/opencms/opencms/
         )
         for c in candidates
     ]
+
 
 
 def resolve_cdsco_pdf_url(jsp_url: str) -> Optional[str]:

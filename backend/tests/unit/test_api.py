@@ -1,4 +1,4 @@
-﻿import pytest
+import pytest
 from moto import mock_aws
 import boto3
 from fastapi.testclient import TestClient
@@ -129,7 +129,8 @@ def test_investigate_endpoint(mock_extract):
     assert data["status"] == "DONE"
 
 
-def test_investigate_deep_endpoint():
+@patch("src.routers.investigate._run_deep_agent_background")
+def test_investigate_deep_endpoint(mock_bg):
     response = client.post(
         "/investigate/deep",
         json={"description": "Tablets have an unusual texture and odor.", "drug_name": "Paracetamol"},
@@ -138,6 +139,7 @@ def test_investigate_deep_endpoint():
     data = response.json()
     assert "session_id" in data
     assert data["status"] == "PROCESSING"
+
 
 
 def test_report_unauthorized():
