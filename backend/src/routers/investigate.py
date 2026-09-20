@@ -26,8 +26,9 @@ def _run_deep_agent_background(session_id: str, request: DeepInvestigateRequest)
     """Executes Deep Agent autonomously with Gemini in background."""
     try:
         from src.agents.deep_agent import run_deep_agent
+        query_text = request.get_query_text()
         run_deep_agent(
-            text=request.description,
+            text=query_text,
             batch_no=request.batch_no,
             drug_name=request.drug_name,
             session_id=session_id,
@@ -163,8 +164,9 @@ def start_deep_investigation(
     Fires the Gemini Deep Agent in the background.
     """
     session_id = str(uuid.uuid4())
+    query_text = request.get_query_text()
     decision = orchestrate(
-        text=request.description,
+        text=query_text or None,
         drug_name=request.drug_name,
         batch_no=request.batch_no,
         has_image=bool(request.image_s3_key),

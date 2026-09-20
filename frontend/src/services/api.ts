@@ -56,32 +56,12 @@ export async function submitVerification(query: UnifiedQuery): Promise<Verificat
   }
 
   // Determine intent:
-  // 1. If text is long / has symptom words or "suspicious", call /investigate/deep
+  // 1. If text has symptom words or "suspicious" or long narrative, pass as deep investigation
   // 2. If image is attached, call /investigate
-  // 3. Otherwise call /check for ultra-fast response
+  // 3. Otherwise call /check
   const textQuery = (query.text || '').trim();
-  const isSuspiciousOrLong =
-    textQuery.length > 50 ||
-    /fake|counterfeit|adverse|reaction|symptom|hospital|suspicious|smudged|defect|smell|taste/i.test(textQuery);
-
-  if (isSuspiciousOrLong) {
-    const res = await fetch(`${API_BASE}/investigate/deep`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        free_text_query: textQuery,
-        batch_no: query.batchNo,
-        drug_name: query.drugName,
-        image_s3_key: imageS3Key,
-      }),
-    });
-    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Deep investigation failed');
-    const data = await res.json();
-    return {
-      session_id: data.session_id,
-      ...data,
-    };
-  }
+  const isSymptomOrAdverse =
+    /fake|counterfeit|adverse|reaction|symptom|hospital|suspicious|smudged|defect|smell|taste|hurt|pain|headache|fever|nausea|vomit|dizzy|sick|pill|medicine|side effect|allergy/i.test(textQuery);
 
   if (imageS3Key) {
     const res = await fetch(`${API_BASE}/investigate`, {
@@ -131,19 +111,21 @@ export async function submitVerification(query: UnifiedQuery): Promise<Verificat
       batchParam = batchMatch[1].toUpperCase();
     } else if (textQuery.length <= 15 && !/\s/.test(textQuery)) {
       batchParam = textQuery.toUpperCase();
-    } else {
+    } else if (!isSymptomOrAdverse) {
+      // Only treat text as a drug name if it's not a symptom or narrative sentence
       const cleanDrug = textQuery.replace(/verify|check|inspect|batch|details|safety|records/gi, '').trim();
-      if (cleanDrug) {
+      if (cleanDrug && cleanDrug.split(/\s+/).length <= 4) {
         drugParam = drugParam || cleanDrug;
       }
     }
   }
 
-  // Quick Check via /check
+  // Quick Check via /check with full text & extracted parameters
   const res = await fetch(`${API_BASE}/check`, {
     method: 'POST',
     headers,
     body: JSON.stringify({
+      text: textQuery || undefined,
       batch_no: batchParam || undefined,
       drug_name: drugParam || undefined,
       manufacturer: query.manufacturer,
@@ -162,7 +144,7 @@ export async function submitVerification(query: UnifiedQuery): Promise<Verificat
   const statusCat =
     raw.status_category === 'MATCH_FOUND' && officialRecord?.alert_status
       ? officialRecord.alert_status
-      : raw.status_category;
+      : raw.status_category || 'CLEAR';
 
   return {
     ...raw,
@@ -172,7 +154,11 @@ export async function submitVerification(query: UnifiedQuery): Promise<Verificat
       raw.summary ||
       (officialRecord
         ? `Batch ${officialRecord.batch_no} (${officialRecord.drug_name}) flagged as ${officialRecord.alert_status}: ${officialRecord.nsq_reason || 'Official CDSCO alert recorded'}.`
-        : `No regulatory quality failure or spurious notice recorded for ${query.batchNo || textQuery || 'the requested item'}.`),
+        : (batchParam || drugParam)
+        ? `No regulatory quality failure or spurious notice recorded for ${batchParam || drugParam}.`
+        : 'Investigation completed. Absence of an official regulatory flag is not proof of safety.'),
+    explanation: raw.explanation,
+    todos: raw.todos,
     official_record: officialRecord,
     community_flag: Boolean(raw.community_flag),
     disclaimer: raw.disclaimer || raw.limitation_statement || 'Absence of a flag is not proof of safety.',
@@ -183,11 +169,15 @@ export async function submitVerification(query: UnifiedQuery): Promise<Verificat
       (decision ? `Classified as ${decision.intent || 'batch_lookup'} (${decision.complexity || 'LOW'} complexity).` : undefined),
     reasoning_trace: raw.reasoning_trace || [
       `Step 1: Orchestrator classified query as ${decision?.intent || 'batch_lookup'} -> routed to ${tier} tier.`,
-      `Step 2: Queried CDSCO official batches registry for batch '${query.batchNo || textQuery}'.`,
+      `Step 2: Queried CDSCO official batches registry for batch '${batchParam || drugParam || 'queried item'}'.`,
       `Step 3: ${officialRecord ? `Match found with status ${officialRecord.alert_status}.` : 'No matching regulatory quality alert recorded in CDSCO repository.'}`,
       `Step 4: Checked community signals -> ${raw.community_flag ? 'community flags present' : 'no active community reports'}.`,
     ],
     sources: raw.sources || [],
+    extracted_fields: raw.extracted_fields || {
+      batch_no: batchParam,
+      drug_name: drugParam,
+    },
   };
 }
 

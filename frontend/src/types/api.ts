@@ -1,6 +1,11 @@
 export type AgentTier = 'SKILL' | 'REACTIVE' | 'DEEP';
 
-export type StatusCategory = 'CLEAR' | 'NSQ' | 'SPURIOUS' | 'COMMUNITY_FLAGGED' | 'NO_MATCH';
+export type StatusCategory = 'CLEAR' | 'NSQ' | 'SPURIOUS' | 'COMMUNITY_FLAGGED' | 'NO_MATCH' | 'INFO_NEEDED';
+
+export interface TodoItem {
+  content: string;
+  status: 'pending' | 'in_progress' | 'completed' | string;
+}
 
 export interface OfficialRecord {
   batch_no: string;
@@ -48,6 +53,8 @@ export interface VerificationResponse {
   session_id: string;
   status_category: StatusCategory;
   summary?: string;
+  explanation?: string;
+  todos?: TodoItem[];
   official_record?: OfficialRecord | null;
   community_flag: boolean;
   community_report_count?: number;
@@ -67,6 +74,7 @@ export interface VerificationResponse {
     expiry_date?: string;
     mfg_date?: string;
     ocr_confidence?: number;
+    symptoms_reported?: string;
   };
   image_url?: string;
   input_type?: 'TEXT' | 'IMAGE';

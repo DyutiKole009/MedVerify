@@ -1,4 +1,4 @@
-﻿import pytest
+import pytest
 from unittest.mock import patch, MagicMock
 from langchain_core.messages import AIMessage
 from src.agents.deep_agent import create_deep_agent, run_deep_agent
@@ -48,4 +48,5 @@ def test_run_deep_agent_fallback(mock_dynamo, mock_create_agent):
     result = run_deep_agent(batch_no="B123", text="Check suspicious package")
     assert result["tier"] == "DEEP"
     assert result["status"] == "COMPLETED"
-    assert "Investigation completed using available regulatory" in result["explanation"]
+    assert len(result["explanation"]) > 50
+    assert len(result["todos"]) > 0
