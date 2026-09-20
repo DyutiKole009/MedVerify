@@ -1,4 +1,4 @@
-﻿"""
+"""
 Investigation API routers (§12.1 POST /investigate & POST /investigate/deep).
 """
 import uuid
@@ -96,11 +96,17 @@ def start_reactive_investigation(
         "input_data": {
             "image_s3_key": request.image_s3_key,
         },
+        "drug_name": drug_name or "Packaging Scan",
+        "batch_no": batch_no or "N/A",
         "extracted_fields": extracted,
         "batch_record": batch_record,
+        "status_category": status_cat if batch_no else "CLEAR",
+        "summary": summary,
+        "reasoning_trace": reasoning_trace,
         "status": "DONE",
         "orchestrator_decision": decision.model_dump(),
         "created_at": now_iso,
+        "completed_at": now_iso,
     }
     sessions_table.put_item(Item=convert_floats_to_decimals(session_item))
 

@@ -75,6 +75,34 @@ def run_quick_check(
     community_flag = agent_result.get("community_flag", False)
     status_category = agent_result.get("status_category", "NO_MATCH")
 
+    # 4. Update session record in DynamoDB with completed verification result
+    try:
+        completed_iso = datetime.now(timezone.utc).isoformat()
+        final_summary = agent_result.get("summary") or (
+            f"Batch {batch_record['batch_no']} ({batch_record.get('drug_name')}) flagged as {batch_record.get('alert_status')}: {batch_record.get('nsq_reason')}."
+            if batch_record
+            else f"No official CDSCO regulatory quality failure recorded for batch {normalized_batch or request.drug_name}."
+        )
+        sessions_table.put_item(Item=convert_floats_to_decimals({
+            "PK": f"SESSION#{session_id}",
+            "SK": "META",
+            "user_id": user["user_id"],
+            "mode": "QUICK_CHECK",
+            "input_type": "TEXT",
+            "drug_name": request.drug_name or (batch_record.get("drug_name") if batch_record else None),
+            "batch_no": normalized_batch or (batch_record.get("batch_no") if batch_record else None),
+            "status_category": status_category,
+            "status": "DONE",
+            "summary": final_summary,
+            "final_result": agent_result,
+            "batch_record": batch_record,
+            "orchestrator_decision": decision.model_dump(),
+            "created_at": now_iso,
+            "completed_at": completed_iso,
+        }))
+    except Exception as exc:
+        pass
+
     return CheckResponse(
         session_id=session_id,
         status_category=status_category,

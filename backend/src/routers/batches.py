@@ -1,4 +1,4 @@
-﻿"""
+"""
 Batches and Manufacturers API router (§12.2).
 """
 from typing import Dict, Any, List
@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from src.domain.normalization import normalize_batch_no
 from src.tools.skill_tools import check_batch, get_manufacturer_history
 from src.tools.aws import get_dynamodb_resource, convert_decimals_to_primitives
-from src.pipelines.nsq_ingestion.scraper import scrape_nsq_listing
+from src.pipelines.nsq_ingestion.scraper import scrape_nsq_listing, run_full_ingestion_pipeline
 from src.config import settings
 from src.utils.logger import logger
 
@@ -30,42 +30,27 @@ def list_regulatory_notices() -> Dict[str, Any]:
             documents.append({
                 "id": item.get("PK", ""),
                 "month": item.get("source_month", ""),
-                "name": item.get("doc_url", "Unknown Document").split("/")[-1],
+                "name": item.get("title") or item.get("doc_url", "CDSCO Notice").split("/")[-1],
                 "type": item.get("doc_type", "CENTRAL"),
                 "batchesFlagged": int(item.get("rows_extracted", 0)),
-                "spuriousCount": 0,
+                "spuriousCount": int(item.get("spurious_count", 0)),
                 "url": item.get("doc_url", ""),
                 "status": "INGESTED" if item.get("parse_status") == "PARSED" else "DISCOVERED_CANDIDATE",
                 "docHash": item.get("PK", "").replace("DOC#", ""),
             })
+        # Sort: documents with batchesFlagged > 0 first, then newest month, then batches count
+        documents.sort(key=lambda d: (d["batchesFlagged"] > 0, d.get("month", ""), d["batchesFlagged"]), reverse=True)
     except Exception as exc:
         logger.warning(f"IngestedDocs scan failed: {exc}. Returning empty list.")
 
     return {"documents": documents}
 
 
+
 @router.post("/batches/notices/scrape")
 def trigger_cdsco_scraper() -> Dict[str, Any]:
-    """Triggers live web scraping of the CDSCO notifications portal (§5.2)."""
-    candidates = scrape_nsq_listing()
-    results = []
-    for idx, c in enumerate(candidates):
-        results.append({
-            "id": f"scraped-{idx+1}",
-            "month": c.source_month,
-            "name": c.title,
-            "type": c.doc_type,
-            "batchesFlagged": 0,
-            "spuriousCount": 0,
-            "url": c.doc_url,
-            "status": "DISCOVERED_CANDIDATE",
-            "docHash": c.doc_hash,
-        })
-    return {
-        "count": len(results),
-        "scraped_at": datetime.now(timezone.utc).isoformat(),
-        "candidates": results,
-    }
+    """Triggers live web scraping of the CDSCO notifications portal and full KB ingestion pipeline (§5.2)."""
+    return run_full_ingestion_pipeline()
 
 
 @router.get("/batches/{batch_no}")
