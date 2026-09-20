@@ -76,6 +76,25 @@ def start_reactive_investigation(
     else:
         reasoning_trace.append("Step 4: Batch number not detected in this view (crop or angle).")
 
+    # Build source attributions from the batch record
+    sources = []
+    if batch_record:
+        month = batch_record.get("source_month", "")
+        month_label = f" · {month}" if month else ""
+        sources.append({
+            "type": "DB",
+            "label": f"CDSCO DynamoDB{month_label} — {batch_record.get('alert_status', 'NSQ')} Record",
+            "reference": batch_record.get("batch_no") or batch_no,
+            "doc_url": batch_record.get("source_document_pdf_url"),
+            "content_preview": (
+                f"Drug: {batch_record.get('drug_name', 'N/A')} | "
+                f"Batch: {batch_record.get('batch_no', 'N/A')} | "
+                f"Manufacturer: {batch_record.get('manufacturer_name', 'N/A')} | "
+                f"Status: {batch_record.get('alert_status', 'N/A')} | "
+                f"Reason: {batch_record.get('nsq_reason', 'N/A')}"
+            ),
+        })
+
     if batch_record:
         summary = f"ALERT: Batch {batch_no} ({drug_name}) is flagged as {status_cat} by CDSCO: {batch_record.get('nsq_reason', 'Regulatory quality failure')}."
     elif batch_no:
@@ -103,6 +122,7 @@ def start_reactive_investigation(
         "status_category": status_cat if batch_no else "CLEAR",
         "summary": summary,
         "reasoning_trace": reasoning_trace,
+        "sources": sources,
         "status": "DONE",
         "orchestrator_decision": decision.model_dump(),
         "created_at": now_iso,
@@ -127,6 +147,7 @@ def start_reactive_investigation(
         status_category=status_cat if batch_no else "CLEAR",
         summary=summary,
         reasoning_trace=reasoning_trace,
+        sources=sources,
     )
 
 

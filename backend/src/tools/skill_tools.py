@@ -148,4 +148,35 @@ def search_drug(fuzzy_text: str, size: int = 5) -> Dict[str, Any]:
     }
 
 
-SKILL_TOOLS = [check_batch, get_manufacturer_history, get_notice, get_case_history, get_community_reports, search_drug]
+@tool
+def retrieve_regulatory_advisory(query_text: str, number_of_results: int = 3) -> Dict[str, Any]:
+    """
+    Retrieve qualitative regulatory advisories, packaging inspection standards,
+    transit theft alerts, clinical failure monographs, or patient safety SOPs
+    from the Amazon Bedrock Knowledge Base.
+    """
+    try:
+        from src.tools.aws import get_boto_session
+        runtime = get_boto_session().client("bedrock-agent-runtime")
+        kb_id = "W7Q20DERIH"
+        resp = runtime.retrieve(
+            knowledgeBaseId=kb_id,
+            retrievalQuery={"text": query_text},
+        )
+
+        results = []
+        for item in resp.get("retrievalResults", []):
+            content = item.get("content", {}).get("text", "")
+            s3_uri = item.get("location", {}).get("s3Location", {}).get("uri", "")
+            score = item.get("score", 0.0)
+            results.append({
+                "content": content,
+                "s3_uri": s3_uri,
+                "score": score
+            })
+        return {"found": True, "results": results}
+    except Exception as exc:
+        return {"found": False, "results": [], "error": str(exc)}
+
+
+SKILL_TOOLS = [check_batch, get_manufacturer_history, get_notice, get_case_history, get_community_reports, search_drug, retrieve_regulatory_advisory]

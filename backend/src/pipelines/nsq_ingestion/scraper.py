@@ -22,8 +22,10 @@ from src.domain.normalization import (
     build_manufacturer_id,
 )
 from src.domain.spurious_detector import detect_alert_status
+from src.pipelines.nsq_ingestion.advisories import UNSTRUCTURED_ADVISORIES
 from src.config import settings
 from src.utils.logger import logger
+
 
 INDIAN_STATES = {
     "andhra pradesh", "arunachal pradesh", "assam", "bihar", "chhattisgarh",
@@ -242,6 +244,7 @@ def download_and_parse_cdsco_pdf(
                     "reporting_lab": "CDL / State Drug Testing Lab",
                     "source_month": source_month,
                     "source_document_s3_key": raw_s3_key,
+                    "source_document_pdf_url": pdf_url,   # Direct CDSCO PDF URL for source attribution
                     "community_flag": False,
                     "community_report_count": 0,
                     "ingested_at": now_iso,
@@ -316,7 +319,58 @@ CORE_GAZETTE_NOTICES: List[Dict[str, Any]] = [
 ]
 
 
+def sync_knowledge_base_advisories() -> Dict[str, Any]:
+    """
+    Synchronizes qualitative narrative advisories into the Amazon Bedrock Knowledge Base S3 bucket
+    and triggers an embedding ingestion job. Excludes tabular batch records (which are served deterministically via DynamoDB).
+    """
+    session = get_boto_session()
+    s3 = session.client("s3")
+    bedrock = session.client("bedrock-agent")
+    bucket = settings.S3_KB_DOCUMENTS_BUCKET
+
+    uploaded_count = 0
+    for adv in UNSTRUCTURED_ADVISORIES:
+        key = f"notices/{adv['filename']}"
+        try:
+            s3.put_object(
+                Bucket=bucket,
+                Key=key,
+                Body=adv["content"].encode("utf-8"),
+                ContentType="text/markdown; charset=utf-8",
+            )
+            uploaded_count += 1
+        except Exception as exc:
+            logger.warning(f"Failed to upload advisory {key}: {exc}")
+
+    # Trigger Bedrock Knowledge Base Ingestion Job
+    job_id = None
+    job_status = "SKIPPED"
+    try:
+        kb_id = "W7Q20DERIH"
+        ds_id = "19SAQUQWAM"
+        job_resp = bedrock.start_ingestion_job(
+            knowledgeBaseId=kb_id,
+            dataSourceId=ds_id,
+            description="Synchronize Qualitative CDSCO Advisories & Packaging Inspection Guides",
+        )
+        job_info = job_resp.get("ingestionJob", {})
+        job_id = job_info.get("ingestionJobId")
+        job_status = job_info.get("status", "STARTING")
+        logger.info(f"Triggered Bedrock KB ingestion job for qualitative advisories: {job_id} ({job_status})")
+    except Exception as exc:
+        logger.warning(f"Could not trigger Bedrock ingestion job: {exc}")
+        job_status = f"FAILED: {exc}"
+
+    return {
+        "advisories_synced": uploaded_count,
+        "job_id": job_id,
+        "status": job_status,
+    }
+
+
 def run_full_ingestion_pipeline(max_live_pdfs: int = 5) -> Dict[str, Any]:
+
     """
     Executes live scraping of the CDSCO notifications portal:
     1. Crawls https://cdsco.gov.in/opencms/opencms/en/Notifications/nsq-drugs/ for alerts.
@@ -378,14 +432,9 @@ def run_full_ingestion_pipeline(max_live_pdfs: int = 5) -> Dict[str, Any]:
                         Body=notice_text.encode("utf-8"),
                         ContentType="text/plain; charset=utf-8",
                     )
-                    s3.put_object(
-                        Bucket=settings.S3_KB_DOCUMENTS_BUCKET,
-                        Key=kb_s3_key,
-                        Body=notice_text.encode("utf-8"),
-                        ContentType="text/plain; charset=utf-8",
-                    )
                 except Exception as exc:
-                    logger.warning(f"S3 upload error for {kb_s3_key}: {exc}")
+                    logger.warning(f"S3 upload error for {raw_s3_key}: {exc}")
+
 
                 notice_spurious = 0
                 for item in parsed_items:
@@ -519,24 +568,8 @@ def run_full_ingestion_pipeline(max_live_pdfs: int = 5) -> Dict[str, Any]:
             pass
 
     # Trigger Bedrock Knowledge Base Ingestion Job
-    bedrock_job_id = None
-    bedrock_job_status = "SKIPPED"
-    try:
-        bedrock = get_boto_session().client("bedrock-agent")
-        kb_id = "W7Q20DERIH"
-        ds_id = "19SAQUQWAM"
-        ingest_resp = bedrock.start_ingestion_job(
-            knowledgeBaseId=kb_id,
-            dataSourceId=ds_id,
-            description=f"Live CDSCO Crawl Ingestion Run at {now_iso}",
-        )
-        job_summary = ingest_resp.get("ingestionJob", {})
-        bedrock_job_id = job_summary.get("ingestionJobId")
-        bedrock_job_status = job_summary.get("status", "STARTING")
-        logger.info(f"Triggered Bedrock Knowledge Base ingestion job: {bedrock_job_id} ({bedrock_job_status})")
-    except Exception as exc:
-        logger.warning(f"Could not trigger Bedrock ingestion job: {exc}")
-        bedrock_job_status = f"FAILED: {exc}"
+    # Sync qualitative advisories into Bedrock Knowledge Base
+    kb_sync = sync_knowledge_base_advisories()
 
     return {
         "status": "SUCCESS",
@@ -549,8 +582,9 @@ def run_full_ingestion_pipeline(max_live_pdfs: int = 5) -> Dict[str, Any]:
         "bedrock_kb": {
             "knowledge_base_id": "W7Q20DERIH",
             "data_source_id": "19SAQUQWAM",
-            "job_id": bedrock_job_id,
-            "status": bedrock_job_status,
+            "advisories_synced": kb_sync.get("advisories_synced", 0),
+            "job_id": kb_sync.get("job_id"),
+            "status": kb_sync.get("status"),
         },
     }
 

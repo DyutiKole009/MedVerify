@@ -110,5 +110,6 @@ def run_quick_check(
         community_flag=community_flag,
         orchestrator_decision=decision.model_dump(),
         limitation_statement="Absence of a flag is not proof of safety.",
+        sources=agent_result.get("sources") or [],
     )
 

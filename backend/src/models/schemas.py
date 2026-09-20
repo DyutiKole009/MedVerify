@@ -11,6 +11,16 @@ class CheckRequest(BaseModel):
     manufacturer: Optional[str] = Field(None, description="Manufacturer name")
 
 
+class SourceChunk(BaseModel):
+    """Represents a single attributed data source returned alongside a verification result."""
+    type: str = Field(description="'DB' for DynamoDB batch record, 'KB' for Bedrock Knowledge Base advisory")
+    label: str = Field(description="Human-readable source label, e.g. 'CDSCO NSQ Alert · Apr 2025'")
+    reference: Optional[str] = Field(None, description="Batch number (DB) or S3 URI (KB)")
+    content_preview: Optional[str] = Field(None, description="First ~150 chars of KB chunk text")
+    doc_url: Optional[str] = Field(None, description="Direct CDSCO PDF URL if available")
+    score: Optional[float] = Field(None, description="Relevance score (KB chunks only)")
+
+
 class CheckResponse(BaseModel):
     session_id: str
     status_category: str = Field(description="MATCH_FOUND | SPURIOUS | COMMUNITY_FLAGGED | NO_MATCH")
@@ -18,6 +28,7 @@ class CheckResponse(BaseModel):
     community_flag: bool = False
     orchestrator_decision: Dict[str, Any]
     limitation_statement: str = "Absence of a flag is not proof of safety."
+    sources: Optional[List["SourceChunk"]] = Field(default=None, description="Attributed data sources used to answer this query")
 
 
 class InvestigateRequest(BaseModel):
@@ -41,6 +52,7 @@ class ProcessingResponse(BaseModel):
     status_category: Optional[str] = None
     summary: Optional[str] = None
     reasoning_trace: Optional[List[str]] = None
+    sources: Optional[List["SourceChunk"]] = Field(default=None, description="Attributed data sources used to answer this query")
 
 
 class FeedbackRequest(BaseModel):
@@ -70,6 +82,7 @@ class PresignUploadResponse(BaseModel):
     upload_url: str
     s3_key: str
     expires_in: int = 3600
+    view_url: Optional[str] = None  # Presigned GET URL — durable image link for chat history
 
 
 class SignUpRequest(BaseModel):

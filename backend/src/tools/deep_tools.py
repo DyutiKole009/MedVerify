@@ -1,4 +1,4 @@
-﻿"""Dynamic investigation tools used by the Deep Agent (LangGraph + Gemini)."""
+"""Dynamic investigation tools used by the Deep Agent (LangGraph + Gemini)."""
 from typing import Any, Dict, List, Optional
 
 from langchain_core.tools import tool
@@ -11,6 +11,8 @@ from src.tools.skill_tools import get_community_reports as skill_get_community_r
 from src.tools.skill_tools import get_manufacturer_history as skill_get_manufacturer_history
 from src.tools.skill_tools import get_notice as skill_get_notice
 from src.tools.skill_tools import search_drug as skill_search_drug
+from src.tools.skill_tools import retrieve_regulatory_advisory as skill_retrieve_regulatory_advisory
+
 
 
 @tool
@@ -89,6 +91,16 @@ def retrieve_similar_cases(
     return skill_get_community_reports(batch_no=batch_no, drug_name=drug_name)
 
 
+@tool
+def retrieve_regulatory_advisory(query_text: str, number_of_results: int = 3) -> Dict[str, Any]:
+    """
+    Retrieve qualitative CDSCO regulatory advisories, packaging inspection standards,
+    transit theft alerts, clinical failure monographs, or patient safety SOPs
+    from the Amazon Bedrock Knowledge Base.
+    """
+    return skill_retrieve_regulatory_advisory(query_text=query_text, number_of_results=number_of_results)
+
+
 DEEP_TOOLS = [
     check_batch,
     get_manufacturer_history,
@@ -98,4 +110,6 @@ DEEP_TOOLS = [
     search_drug,
     retrieve_related_notices,
     retrieve_similar_cases,
+    retrieve_regulatory_advisory,
 ]
+

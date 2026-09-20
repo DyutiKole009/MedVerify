@@ -1,4 +1,4 @@
-﻿"""
+"""
 Skill Agent — dynamic LLM tool-selection agent guided by SKILL.md specifications.
 Uses Strands Agent + Groq with CDSCO regulatory lookup tools.
 """
@@ -72,6 +72,7 @@ def run_skill_agent(
     mfg_result: Dict[str, Any] = {"manufacturer_record": None, "recent_batches": []}
     summary: Optional[str] = None
     tools_invoked: List[str] = []
+    kb_sources: List[Dict[str, Any]] = []  # KB advisory chunks from retrieve_regulatory_advisory
 
     # Attempt LLM tool selection via Strands Agent
     agent = get_skill_strands_agent()
@@ -123,6 +124,18 @@ def run_skill_agent(
                                     community_flag = parsed_tr.get("community_flag", community_flag)
                                 if "manufacturer_record" in parsed_tr:
                                     mfg_result = parsed_tr
+                                # Capture KB advisory chunks for source attribution
+                                if "results" in parsed_tr and parsed_tr.get("found"):
+                                    for kb_item in parsed_tr.get("results", []):
+                                        s3_uri = kb_item.get("s3_uri", "")
+                                        filename = s3_uri.split("/")[-1] if s3_uri else "advisory"
+                                        kb_sources.append({
+                                            "type": "KB",
+                                            "label": f"Bedrock KB · {filename}",
+                                            "reference": s3_uri,
+                                            "content_preview": (kb_item.get("content") or "")[:150],
+                                            "score": kb_item.get("score"),
+                                        })
                         except Exception:
                             pass
 
@@ -131,7 +144,9 @@ def run_skill_agent(
         except Exception as exc:
             logger.warning(f"[SKILL AGENT] Strands LLM tool execution encountered error: {exc}. Falling back to direct tool lookup.")
 
-    # Fallback to direct tool execution if batch_record or manufacturer data were not resolved
+    # -- Fallback direct tool execution ------------------------------------------
+    # batch_record may have been populated from Strands tool results above;
+    # run fallback only when missing.
     if batch_record is None and batch_no:
         batch_result = check_batch(batch_no=batch_no, drug_name=drug_name, manufacturer=manufacturer_name)
         batch_record = batch_result.get("batch_record")
@@ -146,6 +161,33 @@ def run_skill_agent(
 
     if not mfg_result.get("manufacturer_record") and manufacturer_name:
         mfg_result = get_manufacturer_history(manufacturer_name)
+
+    # -- Build source attributions -----------------------------------------------
+    sources: List[Dict[str, Any]] = []
+
+    if batch_record:
+        month = batch_record.get("source_month", "")
+        month_label = f" · {month}" if month else ""
+        sources.append({
+            "type": "DB",
+            "label": f"CDSCO DynamoDB{month_label} — {batch_record.get('alert_status', 'NSQ')} Record",
+            "reference": batch_record.get("batch_no") or batch_no,
+            "doc_url": batch_record.get("source_document_pdf_url"),
+            "content_preview": (
+                f"Drug: {batch_record.get('drug_name', 'N/A')} | "
+                f"Batch: {batch_record.get('batch_no', 'N/A')} | "
+                f"Manufacturer: {batch_record.get('manufacturer_name', 'N/A')} | "
+                f"Status: {batch_record.get('alert_status', 'N/A')} | "
+                f"Reason: {batch_record.get('nsq_reason', 'N/A')}"
+            ),
+        })
+
+    # Merge KB sources (deduplicated by reference)
+    seen_refs = {s["reference"] for s in sources if s.get("reference")}
+    for kb_src in kb_sources:
+        if kb_src.get("reference") not in seen_refs:
+            sources.append(kb_src)
+            seen_refs.add(kb_src.get("reference"))
 
     # Determine status category based on official and community evidence
     if not batch_record and not community_flag:
@@ -179,6 +221,7 @@ def run_skill_agent(
         "summary": summary,
         "tools_invoked": tools_invoked,
         "limitation_statement": "Absence of a flag is not proof of safety.",
+        "sources": sources,
     }
 
     # Persist session to DynamoDB
